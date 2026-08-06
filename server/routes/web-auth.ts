@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import path from "path";
 import { safeJson } from "../hono-helpers.ts";
 import { verifyLocalAccountPassword } from "../../core/local-user-account.ts";
 import {
@@ -7,6 +8,7 @@ import {
   revokeWebSession,
 } from "../../core/web-session-store.ts";
 import { normalizeAccessProfile, scopesForAccessProfile } from "../../shared/access-scope-profiles.ts";
+import { registerUser } from "../auth/register.ts";
 
 const DEFAULT_SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -27,7 +29,50 @@ export function createWebAuthRoute({
 } = {}) {
   if (!hanakoHome) throw new Error("hanakoHome required");
   if (!authService) throw new Error("authService required");
+  // baseDir = dirname(hanakoHome)；M0 中 hanakoHome 传 system 根，故 baseDir 为 <root>
+  const baseDir = path.dirname(hanakoHome);
   const route = new Hono();
+
+  // 注册（M0 新增；GRILL Q11-A：账号/密码落 system 级共享）
+  route.post("/web-auth/register", async (c) => {
+    const body = await safeJson(c);
+    const username = typeof body?.username === "string" ? body.username.trim() : "";
+    const password = typeof body?.password === "string" ? body.password : "";
+    const displayName = typeof body?.displayName === "string" ? body.displayName : username;
+    if (!username || !password) {
+      return c.json({ error: "username_password_required" }, 400);
+    }
+    if (password.length < 8) {
+      return c.json({ error: "password_too_short" }, 400);
+    }
+    let registered;
+    try {
+      registered = await registerUser(baseDir, { username, password, displayName });
+    } catch (e: any) {
+      if (e?.message === "username_taken") return c.json({ error: "username_taken" }, 409);
+      return c.json({ error: e?.message || "register_failed" }, 400);
+    }
+    const principal = {
+      kind: "account_user",
+      credentialKind: "user_session",
+      authMethod: "password",
+      connectionKind: "local",
+      trustState: "local",
+      userId: registered.userId,
+      scopes: registered.scopes,
+    };
+    const issued = createWebSession(hanakoHome, {
+      principal,
+      userAgent: c.req.header("user-agent"),
+      now: now(),
+      ttlMs: DEFAULT_SESSION_TTL_MS,
+    });
+    c.header("Set-Cookie", createSessionCookie(issued.secret, {
+      maxAgeSeconds: Math.floor(DEFAULT_SESSION_TTL_MS / 1000),
+      secure: secureCookies === true,
+    }));
+    return c.json({ ok: true, userId: registered.userId, scopes: registered.scopes });
+  });
 
   route.post("/web-auth/login", async (c) => {
     const body = await safeJson(c);

@@ -199,4 +199,51 @@ describe("web auth route", () => {
     });
     expect(local.status).toBe(200);
   });
+
+  it("registers a new user, issues a session cookie, and exposes it via /session (GRILL Q11-A)", async () => {
+    tmpDir = makeTmpDir();
+    const systemHome = path.join(tmpDir, "system");
+    const { createServerAuthService } = await import("../core/server-auth.ts");
+    const { createWebAuthRoute } = await import("../server/routes/web-auth.ts");
+    const authService = createServerAuthService({
+      hanakoHome: systemHome,
+      loopbackToken: "local-secret",
+      runtimeContext,
+    });
+    const app = new Hono();
+    app.route("/api", createWebAuthRoute({
+      hanakoHome: systemHome,
+      authService,
+      getConnectionKind: () => "local",
+      getRuntimeContext: runtimeContext,
+      secureCookies: false,
+      now: () => "2026-05-16T00:00:01.000Z",
+    }));
+
+    const reg = await app.request("/api/web-auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "Mobile Safari" },
+      body: JSON.stringify({ username: "newbie", password: "password123", displayName: "New Bie" }),
+    });
+    expect(reg.status).toBe(200);
+    const regBody = await reg.json();
+    expect(regBody.ok).toBe(true);
+    expect(regBody.userId).toBeTruthy();
+    expect(regBody.scopes).toContain("SYSTEM_ADMIN"); // 首用户
+    const setCookie = reg.headers.get("set-cookie");
+    expect(setCookie).toContain("hana_session=");
+    expect(setCookie).toContain("HttpOnly");
+
+    // 注册后自动登录：用 cookie 探活
+    const session = await app.request("/api/web-auth/session", {
+      headers: { Cookie: setCookie.split(";")[0] },
+    });
+    expect(session.status).toBe(200);
+    const sessionBody = await session.json();
+    expect(sessionBody.authenticated).toBe(true);
+    expect(sessionBody.principal.userId).toBe(regBody.userId);
+
+    // 业务 home 隔离创建
+    expect(fs.existsSync(path.join(tmpDir, "users", regBody.userId))).toBe(true);
+  });
 });
