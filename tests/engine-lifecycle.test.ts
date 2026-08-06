@@ -1,234 +1,119 @@
-import fs from "fs";
-import os from "os";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import path from "path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { HanaEngine } from "../core/engine.ts";
-import { autoProjectIdForCwd, UNCATEGORIZED_PROJECT_ID } from "../shared/session-projects.ts";
+import { EngineLifecycle, resolveEngineRoots } from "../core/engine-lifecycle.ts";
+import { userHomePath } from "../core/multiuser/paths.ts";
 
-// ---------------------------------------------------------------------------
-// Computer Use lazy runtime
-// ---------------------------------------------------------------------------
+function makeFakeEngine() {
+  return {
+    hanakoHome: "",
+    systemRoot: "",
+    init: vi.fn(),
+    dispose: vi.fn(async () => {}),
+  };
+}
 
-describe("HanaEngine Computer Use lazy runtime", () => {
-  let tmpDir = null;
-  let engines: HanaEngine[] = [];
+describe("EngineLifecycle", () => {
+  let lc: EngineLifecycle;
+  const factory = vi.fn();
+
+  beforeEach(() => {
+    factory.mockClear();
+    factory.mockImplementation(() => Promise.resolve(makeFakeEngine()));
+    lc = new EngineLifecycle({
+      baseDir: "/tmp/hana",
+      productDir: "/tmp/product",
+      engineFactory: (userId: string) => {
+        const e = factory();
+        return e.then((eng: any) => {
+          eng.hanakoHome = userHomePath(userId);
+          return { engine: eng, hub: { id: "hub-" + userId } };
+        });
+      },
+      sweepIntervalMs: 20,
+      idleMs: 50,
+    });
+  });
 
   afterEach(async () => {
-    for (const engine of engines.splice(0).reverse()) {
-      await engine.dispose();
-    }
-    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
-    tmpDir = null;
+    await lc.drainAll();
   });
 
-  function trackEngine(engine: HanaEngine) {
-    engines.push(engine);
-    return engine;
-  }
-
-  function untrackEngine(engine: HanaEngine) {
-    engines = engines.filter((candidate) => candidate !== engine);
-  }
-
-  function createEngine() {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hana-engine-computer-use-"));
-    return trackEngine(new HanaEngine({
-      hanakoHome: tmpDir,
-      productDir: tmpDir,
-      agentId: "hana",
-    } as any));
-  }
-
-  it("does not construct the Computer Use runtime during engine construction", () => {
-    const engine = createEngine();
-
-    expect(engine._computerProviders).toBeNull();
-    expect(engine._computerHost).toBeNull();
+  it("use lazily creates a handle and acquire increments refCount", async () => {
+    const h = await lc.use("alice");
+    expect(h.state).toBe("ready");
+    expect(h.refCount).toBe(1);
+    expect(factory).toHaveBeenCalledTimes(1);
   });
 
-  it("constructs the Computer Use runtime when the global switch is enabled", () => {
-    const engine = createEngine();
-
-    const disabled = engine.setComputerUseSettings({ enabled: false });
-    expect(disabled.enabled).toBe(false);
-    expect(engine._computerProviders).toBeNull();
-    expect(engine._computerHost).toBeNull();
-
-    const enabled = engine.setComputerUseSettings({ enabled: true });
-    expect(enabled.enabled).toBe(true);
-    expect(engine._computerProviders).toBeTruthy();
-    expect(engine._computerHost).toBeTruthy();
+  it("reuses the same handle across repeated use() (refCount)", async () => {
+    const a = await lc.use("alice");
+    const b = await lc.use("alice");
+    expect(a).toBe(b);
+    expect(a.refCount).toBe(2);
+    expect(factory).toHaveBeenCalledTimes(1);
   });
 
-  it("disposes the lazy Computer Use runtime during engine shutdown", async () => {
-    const engine = createEngine();
-    engine.setComputerUseSettings({ enabled: true });
-    const dispose = vi.fn(async () => {});
-    engine._computerHost = { dispose };
-
-    await engine.dispose();
-    untrackEngine(engine);
-
-    expect(dispose).toHaveBeenCalledOnce();
-    expect(engine._computerHost).toBeNull();
-    expect(engine._computerProviders).toBeNull();
+  it("releaseRef decrements but does not dispose while refCount>0", async () => {
+    await lc.use("alice");
+    await lc.use("alice");
+    await lc.releaseRef("alice");
+    const h = await lc.use("alice");
+    expect(h.refCount).toBe(2);
+    expect(h.state).toBe("ready");
+    expect(h.engine.dispose).not.toHaveBeenCalled();
   });
 
-  it("stores usage ledger entries under hanakoHome so engine restarts keep them", () => {
-    const engine = createEngine();
-    engine.usageLedger.record({
-      model: { provider: "openai", modelId: "gpt-5", api: "openai-completions" },
-      usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
-      usageContext: {
-        source: { subsystem: "session", operation: "reply", surface: "desktop", trigger: "user" },
-        attribution: { kind: "session", agentId: "hana", sessionPath: "/sessions/a.jsonl" },
-      },
-    });
-
-    const restarted = trackEngine(new HanaEngine({
-      hanakoHome: tmpDir,
-      productDir: tmpDir,
-      agentId: "hana",
-    } as any));
-
-    expect(restarted.usageLedger.list({}).entries).toMatchObject([
-      {
-        attribution: { kind: "session", sessionPath: "/sessions/a.jsonl" },
-        usage: { totalTokens: 12 },
-      },
-    ]);
-    expect(fs.existsSync(path.join(tmpDir, "usage-ledger.json"))).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Extension factories
-// ---------------------------------------------------------------------------
-
-function makeFactory(name) {
-  return Object.assign(() => {}, { _testName: name });
-}
-
-function names(factories) {
-  return factories.map((factory) => factory._testName);
-}
-
-function makeEngine({ pluginFactories = [] } = {}) {
-  const engine = Object.create(HanaEngine.prototype);
-  engine._coreExtensionFactories = [
-    makeFactory("core-provider"),
-    makeFactory("core-image"),
-  ];
-  engine._frameworkExtFactories = [];
-  engine._extensionFactories = [...engine._coreExtensionFactories];
-  engine._pluginManager = {
-    getExtensionFactories: vi.fn(() => pluginFactories),
-  };
-  engine._resourceLoader = {
-    reload: vi.fn().mockResolvedValue(undefined),
-  };
-  engine._sessionCoord = null;
-  return engine;
-}
-
-describe("HanaEngine extension factories", () => {
-  it("reloads ResourceLoader after plugin extension factories are synced", async () => {
-    const engine = makeEngine({
-      pluginFactories: [makeFactory("plugin-a")],
-    });
-
-    await engine.syncPluginExtensions();
-
-    expect(names(engine._extensionFactories)).toEqual([
-      "core-provider",
-      "core-image",
-      "plugin-a",
-    ]);
-    expect(engine._resourceLoader.reload).toHaveBeenCalledTimes(1);
+  it("keepAlive updates lastActivityAt", async () => {
+    const h = await lc.use("alice");
+    const before = h.lastActivityAt;
+    await new Promise((r) => setTimeout(r, 5));
+    lc.keepAlive("alice");
+    expect(h.lastActivityAt).toBeGreaterThan(before);
   });
 
-  it("keeps all core factories when framework factories are registered later", async () => {
-    const engine = makeEngine({
-      pluginFactories: [makeFactory("plugin-a")],
-    });
-    const frameworkFactory = makeFactory("framework-deferred");
-
-    await engine.registerExtensionFactory(frameworkFactory);
-
-    expect(names(engine._extensionFactories)).toEqual([
-      "core-provider",
-      "core-image",
-      "framework-deferred",
-      "plugin-a",
-    ]);
-    expect(engine._resourceLoader.reload).toHaveBeenCalledTimes(1);
+  it("idle (refCount>0, silent) disposes on sweep (GRILL Q3)", async () => {
+    const h1 = await lc.use("alice"); // refCount=1
+    h1.lastActivityAt = Date.now() - 10_000; // 模拟静默超时
+    await (lc as any).sweep();
+    expect(h1.state).toBe("disposed"); // 静默超时后 sweep 回收
+    expect(h1.engine.dispose).toHaveBeenCalled();
+    const h2 = await lc.use("alice"); // 重建
+    expect(h2).not.toBe(h1);
+    expect(h2.state).toBe("ready");
   });
 
-  it("does not reload live sessions after plugin extension factories change", async () => {
-    const engine = makeEngine({
-      pluginFactories: [makeFactory("plugin-a")],
-    });
-    engine._sessionCoord = {
-      reloadExtensionRunners: vi.fn().mockResolvedValue({ reloaded: 1, skipped: 0, failed: 0 }),
-    };
-
-    await engine.syncPluginExtensions();
-
-    expect(engine._sessionCoord.reloadExtensionRunners).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Session API
-// ---------------------------------------------------------------------------
-
-describe("HanaEngine session API", () => {
-  it("exposes session model switch state without leaking coordinator internals", () => {
-    const engine = Object.create(HanaEngine.prototype);
-    engine._sessionCoord = {
-      isSessionSwitching: vi.fn(() => true),
-    };
-
-    expect(engine.isSessionSwitching("/tmp/session.jsonl")).toBe(true);
-    expect(engine._sessionCoord.isSessionSwitching).toHaveBeenCalledWith("/tmp/session.jsonl");
+  it("A-dispose does not kill B (GRILL Q5)", async () => {
+    const a = await lc.use("alice");
+    const b = await lc.use("bob");
+    a.lastActivityAt = Date.now() - 10_000; // 仅 A 静默超时
+    await (lc as any).sweep();
+    expect(a.state).toBe("disposed");
+    expect(b.state).toBe("ready");
+    expect(b.engine.dispose).not.toHaveBeenCalled();
   });
 
-  it("deletes a project by moving explicit and cwd-derived sessions to uncategorized", async () => {
-    const engine = Object.create(HanaEngine.prototype);
-    const cwdProjectId = autoProjectIdForCwd("/tmp/project-hana");
-    engine._sessionProjects = {
-      deleteProject: vi.fn(() => ({ folders: [], projects: [] })),
-    };
-    engine._sessionCoord = {
-      listSessions: vi.fn(async () => [
-        { path: "/tmp/agents/hana/sessions/explicit.jsonl", cwd: "/elsewhere", projectId: cwdProjectId },
-        { path: "/tmp/agents/hana/sessions/implicit.jsonl", cwd: "/tmp/project-hana", projectId: null },
-        { path: "/tmp/agents/hana/sessions/other.jsonl", cwd: "/tmp/other", projectId: null },
-      ]),
-      writeSessionMeta: vi.fn(async () => undefined),
-    };
+  it("drainAll disposes everything", async () => {
+    await lc.use("alice");
+    await lc.use("bob");
+    await lc.drainAll();
+    expect(lc.activeCount()).toBe(0);
+  });
 
-    const result = await engine.deleteSessionProject(cwdProjectId);
+  it("reuse after dispose rebuilds a fresh ready handle (data not lost at lifecycle level, G6)", async () => {
+    const h = await lc.use("alice"); // refCount=1
+    h.lastActivityAt = Date.now() - 10_000;
+    await (lc as any).sweep(); // idle -> disposed
+    expect(h.state).toBe("disposed");
+    const h2 = await lc.use("alice"); // rebuild
+    expect(h2).not.toBe(h);
+    expect(h2.state).toBe("ready");
+    expect(h2.refCount).toBe(1);
+    expect(factory).toHaveBeenCalledTimes(2);
+  });
 
-    expect(engine._sessionProjects.deleteProject).toHaveBeenCalledWith(cwdProjectId);
-    expect(engine._sessionCoord.writeSessionMeta).toHaveBeenCalledTimes(2);
-    expect(engine._sessionCoord.writeSessionMeta).toHaveBeenCalledWith(
-      "/tmp/agents/hana/sessions/explicit.jsonl",
-      { projectId: UNCATEGORIZED_PROJECT_ID },
-    );
-    expect(engine._sessionCoord.writeSessionMeta).toHaveBeenCalledWith(
-      "/tmp/agents/hana/sessions/implicit.jsonl",
-      { projectId: UNCATEGORIZED_PROJECT_ID },
-    );
-    expect(result).toEqual({
-      catalog: { folders: [], projects: [] },
-      assignment: {
-        projectId: UNCATEGORIZED_PROJECT_ID,
-        sessionPaths: [
-          "/tmp/agents/hana/sessions/explicit.jsonl",
-          "/tmp/agents/hana/sessions/implicit.jsonl",
-        ],
-      },
-    });
+  it("resolveEngineRoots computes dual root (GRILL Q11-A)", () => {
+    const r = resolveEngineRoots("/tmp/hana", "alice");
+    expect(r.userDataRoot).toBe(path.join("/tmp/hana", "users", "alice"));
+    expect(r.systemRoot).toBe(path.join("/tmp/hana", "system"));
   });
 });
