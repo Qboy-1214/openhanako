@@ -330,12 +330,15 @@ export class HanaEngine {
   declare appVersion: any;
   declare channelsDir: any;
   declare hanakoHome: any;
+  declare systemRoot: any;
   declare _inputDrafts: any;
   declare productDir: any;
   declare userDir: any;
   /**
    * @param {object} dirs
-   * @param {string} dirs.hanakoHome
+   * @param {string} dirs.hanakoHome 业务数据根（= users/<userId>）
+   * @param {string} [dirs.systemRoot] system 级共享根（账号/会话/授权等）。
+   *   缺省时退化为 hanakoHome，保持单用户模式旧行为（GRILL Q11-A 双根）。
    * @param {string} dirs.productDir
    * @param {string} [dirs.agentId]
    * @param {string} [dirs.appVersion]
@@ -344,8 +347,9 @@ export class HanaEngine {
    *   root. Absent/empty means an open composition: the media runtime
    *   constructs with zero built-in adapters, never an implicit import.
    */
-  constructor({ hanakoHome, productDir, agentId, appVersion, builtinMediaAdapters }) {
+  constructor({ hanakoHome, systemRoot, productDir, agentId, appVersion, builtinMediaAdapters }) {
     this.hanakoHome = hanakoHome;
+    this.systemRoot = systemRoot || hanakoHome; // GRILL Q11-A 双根；单根退化
     this.productDir = productDir;
     this.appVersion = appVersion || "0.0.0";
     this._runtimeContext = null;
