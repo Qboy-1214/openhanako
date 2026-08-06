@@ -11,6 +11,17 @@
  * still `evidence-needed` (neither confirmed open nor confirmed
  * closed-product, see build/open-boundary-baseline.json), and this file
  * must not silently reclassify it by absorbing its mount call.
+ *
+ * ── M0 多用户范围声明（GRILL Q11-A 最小骨架验证）──
+ * 本文件挂载的所有 open 路由在 M0 仍走 `ctx.engine`（系统级兜底引擎），
+ * 未逐个改为按 userId 从 `ctx.engineLifecycle` 取引擎。原因：全量按用户
+ * 引擎接管需架构级统一 `hanakoHome`→system 根模型（现状 dev:web 的
+ * hanakoHome 是单用户实际 home），推迟到 M1。
+ * M0 已验证的多用户能力：注册/登录/登出（web-auth，账号与密码落 system
+ * 共享）、每用户 `users/<userId>/` 业务 home 隔离（register 创建）、
+ * SYSTEM_ADMIN 首用户 + 注册锁、EngineLifecycle 引用计数 + WS 静默计时机制
+ * （单测通过，经 `ctx.engineLifecycle` 暴露）。业务数据隔离由
+ * `users/<userId>/` 目录天然实现。
  */
 import type { Hono } from "hono";
 import type { CompositionContext } from "./contract.ts";
