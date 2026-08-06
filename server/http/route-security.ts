@@ -6,6 +6,15 @@ const PUBLIC = Object.freeze({ kind: "public" });
 const STUDIO_OWNER = Object.freeze({ kind: "studio_owner" });
 
 /**
+ * 系统管理员 scope（GRILL→spec §3）。
+ * 首用户注册时写入 scopes（见 server/auth/register.ts）。principal 携带该
+ * scope 即表示 SYSTEM_ADMIN。M0 仅作为数据字段随 principal 传递；真正要求
+ * SYSTEM_ADMIN 才能访问的系统级路由（如改 system/provider-catalog.json 兜底
+ * 模型）的强制拦截推迟到 M1（避免 M0 范围膨胀）。
+ */
+export const SYSTEM_ADMIN_SCOPE = "system_admin";
+
+/**
  * 宿主自有的 /api/plugins/* 一级命名空间。这些 id 下的子路径属于插件管理 API，
  * 永远不会被代理到插件 route app，也绝不接受 plugin surface 凭证。
  * server/routes/plugins.ts 的 iframe ticket 签发校验与这里共用同一份名单。
