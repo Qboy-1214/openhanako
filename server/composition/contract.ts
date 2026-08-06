@@ -44,6 +44,12 @@ export interface CompositionContext {
   confirmStore: any;
   /** Product version string surfaced by `/api/server/identity`. */
   appVersion: string;
+  /**
+   * 按用户的引擎生命周期（GRILL Q4/Q11-A）。M0 作为可选机制接缝；
+   * 全量路由接管（替换全局兜底 engine）推迟到 M1。存在时，路由可经
+   * `userEngineMiddleware` / `bindEngineToWs` 按 userId 取引擎。
+   */
+  engineLifecycle?: any;
 }
 
 export interface CompositionRoot {

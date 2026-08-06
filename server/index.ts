@@ -961,6 +961,16 @@ export async function startServer(root: CompositionRoot = {}): Promise<void> {
   // 隐式把它计入"已确认开放"。root.registerClosedRoutes 存在时才追加闭集产品
   // 路由(avatar/character-cards/cards/desk/diary)——这是静态入参，不是运行
   // 时开关：选哪个组合由"哪个入口文件被 spawn/import"在进程启动前一次性决定。
+  // 按用户引擎生命周期（GRILL Q4/Q11-A）：作为机制接缝注入 ctx。
+  // M0 不强行接管所有路由（保留全局 engine 兜底）；全量按用户引擎实例化
+  // + server 组合重构推迟到 M1（需架构级统一 hanakoHome→system 根模型）。
+  const engineLifecycle = new (await import("../core/engine-lifecycle.ts")).EngineLifecycle({
+    baseDir: path.dirname(hanakoHome),
+    productDir,
+    appVersion,
+    builtinMediaAdapters: root.builtinMediaAdapters,
+  });
+
   const ctx: CompositionContext = {
     engine,
     hub,
@@ -971,6 +981,7 @@ export async function startServer(root: CompositionRoot = {}): Promise<void> {
     bridgeManagerRef,
     confirmStore,
     appVersion,
+    engineLifecycle,
   };
   registerOpenRoutes(app, ctx);
   app.route("/api", createMobileWorkbenchRoute(engine));
