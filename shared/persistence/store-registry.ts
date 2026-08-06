@@ -1,3 +1,4 @@
+import path from "path";
 import type {
   PersistenceExemption,
   PersistenceFormat,
@@ -8,6 +9,20 @@ import type {
   StartupPhase,
   StoreDescriptor,
 } from "./store-registry-types.ts";
+
+/**
+ * 双根解析（GRILL Q9/Q11-A）。
+ * baseDir = path.dirname(hanakoHome)，其中 hanakoHome = <root>/system。
+ * - 业务 store 根 = baseDir/users/<userId>
+ * - 系统级（共享）store 根 = baseDir/system
+ */
+export function businessStoreDir(baseDir: string, userId: string): string {
+  return path.join(baseDir, "users", userId);
+}
+
+export function systemStoreDir(baseDir: string): string {
+  return path.join(baseDir, "system");
+}
 
 const ALL_SITE_KINDS: readonly PersistenceSiteKind[] = [
   "database-open",

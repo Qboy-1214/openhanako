@@ -74,6 +74,37 @@ export function setLocalAccountPassword(hanakoHome, {
   return sanitizeAccount(user, { passwordSet: true });
 }
 
+/**
+ * 多用户注册专用：为指定 userId 设置密码（复用内部 credential 结构与哈希算法）。
+ * 不依赖 defaultUserId，因此可安全地为任意已注册用户写入密码。
+ * 单用户模式继续用 setLocalAccountPassword（作用于默认用户），此函数与其并存。
+ */
+export function setLocalAccountPasswordForUser(hanakoHome, userId, password, now = new Date().toISOString()) {
+  const normalizedPassword = normalizePassword(password);
+  const auth = loadLocalUserAuth(hanakoHome);
+  const credential = findCredential(auth, userId);
+  const passwordSalt = randomToken(16);
+  const passwordHash = hashPassword(normalizedPassword, passwordSalt);
+  const nextCredential = {
+    schemaVersion: SCHEMA_VERSION,
+    userId,
+    algorithm: PASSWORD_ALGORITHM,
+    passwordHash,
+    passwordSalt,
+    keyLength: PASSWORD_KEY_LENGTH,
+    params: { ...SCRYPT_OPTIONS },
+    createdAt: credential?.createdAt || now,
+    updatedAt: now,
+  };
+  if (credential) {
+    Object.assign(credential, nextCredential);
+  } else {
+    auth.credentials.push(nextCredential);
+  }
+  auth.updatedAt = now;
+  writeSecretJson(path.join(hanakoHome, LOCAL_USER_AUTH_FILE), auth);
+}
+
 export function clearLocalAccountPassword(hanakoHome, {
   now = new Date().toISOString(),
 } = {}) {
