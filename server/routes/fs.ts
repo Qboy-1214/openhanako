@@ -11,9 +11,26 @@ import fs from "fs";
 import path from "path";
 import { Hono } from "hono";
 import { safeReadFile } from "../../shared/safe-fs.ts";
+import { assertWithinUserRoot, PathGuardError } from "../../core/multiuser/paths.ts";
 
 function isInsideRoot(candidatePath, rootPath) {
   return candidatePath === rootPath || candidatePath.startsWith(rootPath + path.sep);
+}
+
+/**
+ * M1 (Task 4) path-guard 纵深防御：解析 (白名单) 通过后，再用 assertWithinUserRoot
+ * 校验最终路径确实落在当前用户业务根 (baseDir/users/<userId>) 内，防止白名单逻辑
+ * 缺陷导致跨用户读取。userId 缺失时拒绝（未认证不应访问任何用户根）。
+ */
+function guardUserRoot(c: any, engine: any, allowedPath: string) {
+  const userId = c.get("principal")?.userId;
+  if (!userId) {
+    const err = new PathGuardError("unauthenticated access to user root");
+    (err as any).status = 401;
+    throw err;
+  }
+  const baseDir = path.dirname(path.resolve(engine.hanakoHome));
+  assertWithinUserRoot(userId, allowedPath, baseDir);
 }
 
 /**
@@ -95,6 +112,14 @@ export function createFsRoute(getEngine: (c: any) => any) {
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
     }
+    try {
+      guardUserRoot(c, engine, allowedPath);
+    } catch (e) {
+      if (e instanceof PathGuardError) {
+        return c.json({ error: "path out of user scope" }, (e as any).status || 403);
+      }
+      throw e;
+    }
     const content = safeReadFile(allowedPath, null);
     if (content === null) return c.json({ error: "file not found" }, 404);
     return c.text(content);
@@ -108,6 +133,14 @@ export function createFsRoute(getEngine: (c: any) => any) {
     const allowedPath = resolveAllowedPath(filePath, getAllowedRoots(engine));
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
+    }
+    try {
+      guardUserRoot(c, engine, allowedPath);
+    } catch (e) {
+      if (e instanceof PathGuardError) {
+        return c.json({ error: "path out of user scope" }, (e as any).status || 403);
+      }
+      throw e;
     }
     try {
       const buf = fs.readFileSync(allowedPath);
@@ -125,6 +158,14 @@ export function createFsRoute(getEngine: (c: any) => any) {
     const allowedPath = resolveAllowedPath(filePath, getAllowedRoots(engine));
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
+    }
+    try {
+      guardUserRoot(c, engine, allowedPath);
+    } catch (e) {
+      if (e instanceof PathGuardError) {
+        return c.json({ error: "path out of user scope" }, (e as any).status || 403);
+      }
+      throw e;
     }
     try {
       const stat = fs.statSync(allowedPath);
@@ -147,6 +188,14 @@ export function createFsRoute(getEngine: (c: any) => any) {
     const allowedPath = resolveAllowedPath(filePath, getAllowedRoots(engine));
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
+    }
+    try {
+      guardUserRoot(c, engine, allowedPath);
+    } catch (e) {
+      if (e instanceof PathGuardError) {
+        return c.json({ error: "path out of user scope" }, (e as any).status || 403);
+      }
+      throw e;
     }
     try {
       const stat = fs.statSync(allowedPath);

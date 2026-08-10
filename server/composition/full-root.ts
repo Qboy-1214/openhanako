@@ -24,8 +24,10 @@ import { builtinImageGenAdapters } from "../../core/media-adapters/builtin-adapt
 
 export function registerClosedRoutes(app: Hono, ctx: CompositionContext): void {
   const { engine, hub } = ctx;
+  // M1 F1: closed 路由在请求时按用户解析引擎（userEngineMiddleware 已把每用户引擎挂到 c.get('engine')）
+  const getUserEngine = (c: any) => c.get("engine") ?? engine;
   app.route("/api", createAvatarRoute(engine));
-  app.route("/api", createCharacterCardsRoute(engine));
+  app.route("/api", createCharacterCardsRoute(getUserEngine));
   app.route("/api", createCardsRoute(engine));
   app.route("/api", createDeskRoute(engine, hub));
   app.route("/api", createDiaryRoute(engine));

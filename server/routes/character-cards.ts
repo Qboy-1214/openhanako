@@ -51,12 +51,13 @@ function pickUploadedFile(body: Record<string, any>) {
   return null;
 }
 
-export function createCharacterCardsRoute(engine) {
+export function createCharacterCardsRoute(getEngine: (c: any) => any) {
   const route = new Hono();
-  const service = createCharacterCardService(engine);
 
   route.post("/character-cards/plan", bodyLimit({ maxSize: MAX_CARD_PACKAGE_SIZE }), async (c) => {
     try {
+      const engine = getEngine(c);
+      const service = createCharacterCardService(engine);
       const contentType = c.req.header("content-type") || "";
       let sourcePath;
       let originalName;
@@ -79,6 +80,7 @@ export function createCharacterCardsRoute(engine) {
 
   route.get("/character-cards/plans/:token/assets/:asset", async (c) => {
     try {
+      const service = createCharacterCardService(getEngine(c));
       const { filePath, mime } = service.resolvePlanAsset(c.req.param("token"), c.req.param("asset"));
       c.header("Content-Type", mime);
       c.header("Cache-Control", "private, max-age=3600");
@@ -90,6 +92,7 @@ export function createCharacterCardsRoute(engine) {
 
   route.get("/character-cards/export/:agentId/assets/:asset", async (c) => {
     try {
+      const service = createCharacterCardService(getEngine(c));
       const { filePath, mime } = service.resolveExportAsset(c.req.param("agentId"), c.req.param("asset"));
       c.header("Content-Type", mime);
       c.header("Cache-Control", "no-store");
@@ -101,6 +104,8 @@ export function createCharacterCardsRoute(engine) {
 
   route.post("/character-cards/import", async (c) => {
     try {
+      const engine = getEngine(c);
+      const service = createCharacterCardService(engine);
       const body = await safeJson(c);
       const result = await service.commitImportPlan(body.token, {
         importMemory: body.importMemory === true,
@@ -117,6 +122,7 @@ export function createCharacterCardsRoute(engine) {
 
   route.post("/character-cards/export/preview", async (c) => {
     try {
+      const service = createCharacterCardService(getEngine(c));
       const body = await safeJson(c);
       const plan = await service.createExportPreview(body.agentId);
       return c.json({ ok: true, plan });
@@ -127,6 +133,7 @@ export function createCharacterCardsRoute(engine) {
 
   route.post("/character-cards/export/plan", async (c) => {
     try {
+      const service = createCharacterCardService(getEngine(c));
       const body = await safeJson(c);
       const plan = await service.createExportPreview(body.agentId);
       return c.json({ ok: true, plan });
@@ -137,6 +144,7 @@ export function createCharacterCardsRoute(engine) {
 
   route.post("/character-cards/export", async (c) => {
     try {
+      const service = createCharacterCardService(getEngine(c));
       const body = await safeJson(c);
       const result = await service.exportAgentPackage(body.agentId, {
         exportMemory: body.exportMemory === true,

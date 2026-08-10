@@ -35,6 +35,7 @@ import { createRequestContext } from "../http/boundary.ts";
 import { createApiResourceOperationContext, requestIdFromHono } from "../http/resource-operation-context.ts";
 import { MountAwareFileError, MountAwareFileService } from "../../core/mount-aware-file-service.ts";
 import { materializeUploadedSkillPackage } from "../utils/uploaded-skill-package.ts";
+import { assertWithinUserRoot } from "../../core/multiuser/paths.ts";
 import { requireAutomationExecutionContext } from "../../lib/desk/automation-execution-context.ts";
 
 /** 安全路径校验：target 必须在 baseDir 内部（解析 symlink 后比较） */
@@ -69,22 +70,30 @@ function selectedAgentDeskRoots(engine, agentId) {
 }
 
 /** 校验 dir 覆盖：仅允许 engine 已知的根目录（解析 symlink 后比较） */
-function isApprovedDir(dir, engine, { agentId = null } = {}) {
-  if (isInsideAnyRoot(dir, selectedAgentDeskRoots(engine, agentId))) {
-    return true;
+function isApprovedDir(dir, engine, { agentId = null, userId = null } = {}) {
+  const approved =
+    isInsideAnyRoot(dir, selectedAgentDeskRoots(engine, agentId)) ||
+    (typeof engine.isApprovedDeskDir === "function" && engine.isApprovedDeskDir(dir, { agentId })) ||
+    (typeof engine.isApprovedWorkspaceDir === "function" && engine.isApprovedWorkspaceDir(dir, { agentId })) ||
+    isInsideAnyRoot(
+      dir,
+      [
+        engine.deskCwd,
+        engine.homeCwd,
+        ...(Array.isArray(engine.config?.cwd_history) ? engine.config.cwd_history : []),
+      ].filter(Boolean),
+    );
+  if (!approved) return false;
+  // M1 (Task 4) path-guard 纵深防御：白名单通过后，确认 dir 确实落在当前用户
+  // 业务根 (baseDir/users/<userId>) 内，防止白名单逻辑缺陷导致跨用户访问。
+  if (userId) {
+    try {
+      assertWithinUserRoot(userId, dir, path.dirname(path.resolve(engine.hanakoHome)));
+    } catch {
+      return false;
+    }
   }
-  if (typeof engine.isApprovedDeskDir === "function") {
-    return engine.isApprovedDeskDir(dir, { agentId });
-  }
-  const approved = [
-    engine.deskCwd,
-    engine.homeCwd,
-    ...(Array.isArray(engine.config?.cwd_history) ? engine.config.cwd_history : []),
-  ].filter(Boolean);
-  if (typeof engine.isApprovedWorkspaceDir === "function" && engine.isApprovedWorkspaceDir(dir, { agentId })) {
-    return true;
-  }
-  return isInsideAnyRoot(dir, approved);
+  return true;
 }
 
 function defaultDeskDir(engine) {
@@ -1242,7 +1251,7 @@ export function createDeskRoute(engine, hub) {
       const workspace = resolveWorkspaceRootFromRequest(c);
       const dir = workspace.dir;
       if (!dir) return c.json({ skills: [], policy });
-      if (!workspace.mountId && c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) {
+      if (!workspace.mountId && c.req.query("dir") && !isApprovedDir(dir, engine, { agentId, userId: c.get("principal")?.userId })) {
         return c.json({ skills: [], policy });
       }
 
@@ -1306,7 +1315,7 @@ export function createDeskRoute(engine, hub) {
       if (!sourcePath || !cwd) {
         return c.json({ error: "skill package and active workspace required" }, 400);
       }
-      if (!workspace.mountId && dir && !isApprovedDir(cwd, engine, { agentId })) {
+      if (!workspace.mountId && dir && !isApprovedDir(cwd, engine, { agentId, userId: c.get("principal")?.userId })) {
         return c.json({ error: "workspace is not approved" }, 403);
       }
 
@@ -1378,7 +1387,7 @@ export function createDeskRoute(engine, hub) {
     const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ path: null });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId, userId: c.get("principal")?.userId })) return c.json({ error: t("error.dirNotAllowed") });
     fs.mkdirSync(dir, { recursive: true });
     return c.json({ path: dir });
   });
@@ -1388,7 +1397,7 @@ export function createDeskRoute(engine, hub) {
     const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ files: [], subdir: "", basePath: null });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId, userId: c.get("principal")?.userId })) return c.json({ error: t("error.dirNotAllowed") });
     const subdir = c.req.query("subdir") || "";
     // 安全：禁止路径穿越
     if (subdir && (subdir.includes("\\") || subdir.includes("..") || subdir.startsWith("."))) {
@@ -1409,7 +1418,7 @@ export function createDeskRoute(engine, hub) {
     const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ results: [], basePath: null, query: c.req.query("q") || "" });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId, userId: c.get("principal")?.userId })) return c.json({ error: t("error.dirNotAllowed") });
     const query = c.req.query("q") || "";
     const limitRaw = Number.parseInt(c.req.query("limit") || "", 10);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0
@@ -1430,7 +1439,7 @@ export function createDeskRoute(engine, hub) {
     const agentId = c.req.query("agentId") || null;
     const dir = c.req.query("dir") ? decodeURIComponent(c.req.query("dir")) : defaultDeskDir(engine);
     if (!dir) return c.json({ content: null });
-    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
+    if (c.req.query("dir") && !isApprovedDir(dir, engine, { agentId, userId: c.get("principal")?.userId })) return c.json({ error: t("error.dirNotAllowed") });
     const subdir = c.req.query("subdir") || "";
     if (subdir && (subdir.includes("\\") || subdir.includes("..") || subdir.startsWith("."))) {
       return c.json({ error: "invalid subdir" });
@@ -1452,7 +1461,7 @@ export function createDeskRoute(engine, hub) {
     const agentId = body.agentId || null;
     const dir = body.dir ? body.dir : defaultDeskDir(engine);
     if (!dir) return c.json({ error: t("error.noWorkspace") });
-    if (body.dir && !isApprovedDir(dir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
+    if (body.dir && !isApprovedDir(dir, engine, { agentId, userId: c.get("principal")?.userId })) return c.json({ error: t("error.dirNotAllowed") });
     const { subdir, content } = body;
     const sub = subdir || "";
     if (sub && (sub.includes("\\") || sub.includes("..") || sub.startsWith("."))) {
@@ -1483,7 +1492,7 @@ export function createDeskRoute(engine, hub) {
     const agentId = body.agentId || null;
     const baseDir = body.dir || defaultDeskDir(engine);
     if (!baseDir) return c.json({ error: t("error.noWorkspace") });
-    if (body.dir && !isApprovedDir(baseDir, engine, { agentId })) return c.json({ error: t("error.dirNotAllowed") });
+    if (body.dir && !isApprovedDir(baseDir, engine, { agentId, userId: c.get("principal")?.userId })) return c.json({ error: t("error.dirNotAllowed") });
     fs.mkdirSync(baseDir, { recursive: true });
 
     const { action, subdir: sub, paths, name, content, oldName, newName } = body;
