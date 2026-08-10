@@ -90,15 +90,20 @@ export function registerOpenRoutes(app: Hono, ctx: CompositionContext): void {
     bridgeManagerRef,
     confirmStore,
     appVersion,
+    engineLifecycle,
   } = ctx;
 
   // M1 F1: 高敏感路由在请求时按用户解析引擎；userEngineMiddleware 把每用户引擎挂到 c.get('engine')，
   // 未命中时回退全局兜底引擎（系统/只读路由仍用 ctx.engine）。
   const getUserEngine = (c: any) => c.get("engine") ?? engine;
 
-  // chat 路由的引擎隔离在 M1 Task 3 单独处理（WS 经 bindEngineToWs 走 ws.engine，
-  // 工厂级单例 AgentReviewTurnCoordinator 需重新设计来源），此处暂用全局兜底引擎（M0 行为）。
-  const { restRoute: chatRestRoute, wsRoute: chatWsRoute } = createChatRoute(engine, hub, { upgradeWebSocket });
+  // M1 Task 3: chat 的 WS 引擎隔离经 bindEngineToWs 在 onOpen 绑定 ws.engine/ws.hub，
+  // 工厂级单例 AgentReviewTurnCoordinator（REST Agent Review 路径）仍用全局兜底引擎（M0 行为）。
+  const { restRoute: chatRestRoute, wsRoute: chatWsRoute } = createChatRoute(
+    engine,
+    hub,
+    { upgradeWebSocket, engineLifecycle },
+  );
   app.route("", createMobileStaticRoute(decideMobileStaticRouteOptions()));
   app.route("", createHtmlPreviewRoute());
   app.route("/api", chatRestRoute);

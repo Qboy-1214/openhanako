@@ -66,6 +66,7 @@ import {
   wsClientCanReceiveEvent,
   wsClientCanSendMessage,
 } from "../ws-scope.ts";
+import { bindEngineToWs } from "../ws/engine-ws-binding.ts";
 
 const log = createModuleLogger("chat");
 const wsLog = createModuleLogger("ws");
@@ -338,7 +339,11 @@ export function resolveTurnStallAbortMs(value = process.env.HANA_TURN_STALL_ABOR
   return Math.floor(parsed);
 }
 
-export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any) {
+export function createChatRoute(
+  engine: any,
+  hub: any,
+  { upgradeWebSocket, engineLifecycle }: any,
+) {
   const restRoute = new Hono();
   const wsRoute = new Hono();
 
@@ -1763,6 +1768,12 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
           }));
           cancelDisconnectAbort();
           debugLog()?.log("ws", "client connected");
+
+          // Task 3: 绑定每用户引擎到该 WS 连接（异步 acquire userId 对应 engine）。
+          // onMessage 路径优先使用 ws.engine/ws.hub，实现多用户 session 根隔离。
+          if (engineLifecycle) {
+            bindEngineToWs(ws, engineLifecycle, c);
+          }
         },
 
         onMessage(event, ws) {
@@ -1787,6 +1798,9 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
 
           // Wrap the async handler with error handling (replaces wrapWsHandler)
           (async () => {
+            // Task 3: 每连接引擎解析（bindEngineToWs 设置的 ws.engine/ws.hub 优先）
+            const eng = ws.engine ?? engine;
+            const h = ws.hub ?? hub;
             if (msg.type === "abort") {
               const abortTarget = requireBoundSessionTarget(msg, ws); if (!abortTarget) return;
               const abortPath = abortTarget.sessionPath;
@@ -1823,7 +1837,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
               let abortAccepted = false;
               try {
                 abortAccepted = !!(await agentReviewTurns.cancelByParent(abortTarget.sessionId, abortReason));
-                if (!abortAccepted) abortAccepted = !!(await hub.abort(abortPath, { reason: abortReason }));
+                if (!abortAccepted) abortAccepted = !!(await h.abort(abortPath, { reason: abortReason }));
               } catch {}
               if (!abortAccepted) {
                 const abortStreamId = abortSs?.streamId || null;
@@ -1855,7 +1869,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                 rejectDeletedAgentSession(ws, steerPath);
                 return;
               }
-              if (engine.steerSession(steerPath, msg.text)) {
+              if (eng.steerSession(steerPath, msg.text)) {
                 wsSend(ws, { type: "steered" });
                 return;
               }
@@ -1870,8 +1884,8 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
               const currentPath = resumeTarget.sessionPath;
               const currentSessionId = resumeTarget.sessionId;
               const ss = getExistingState(currentPath);
-              const runtimeIsStreaming = typeof engine.isSessionStreaming === "function"
-                ? !!engine.isSessionStreaming(currentPath)
+              const runtimeIsStreaming = typeof eng.isSessionStreaming === "function"
+                ? !!eng.isSessionStreaming(currentPath)
                 : !!ss?.isStreaming;
               if (ss) {
                 const resumed = resumeSessionStream(ss, {
@@ -1909,8 +1923,8 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
 
             if (msg.type === "context_usage") {
               const usagePath = requireSessionPath(msg, ws); if (!usagePath) return;
-              const usage = engine.getSessionContextUsage?.(usagePath)
-                || engine.getSessionByPath(usagePath)?.getContextUsage?.();
+              const usage = eng.getSessionContextUsage?.(usagePath)
+                || eng.getSessionByPath(usagePath)?.getContextUsage?.();
               wsSend(ws, {
                 type: "context_usage",
                 sessionPath: usagePath,
@@ -1927,12 +1941,12 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                 rejectDeletedAgentSession(ws, sp);
                 return;
               }
-              const dispatcher = engine.slashDispatcher;
+              const dispatcher = eng.slashDispatcher;
               if (!dispatcher) {
                 wsSend(ws, { type: "error", message: "slash system not ready", sessionPath: sp });
                 return;
               }
-              const session = engine.getSessionByPath(sp);
+              const session = eng.getSessionByPath(sp);
               const agentId = session?.agentId || msg.agentId;
               if (!agentId) {
                 wsSend(ws, { type: "error", message: "agentId required", sessionPath: sp });
@@ -1942,7 +1956,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                 wsSend(ws, { type: "slash_result", sessionPath: sp, text, level: "success" });
               };
               const res = await dispatcher.tryDispatch(msg.text.trim(), {
-                sessionRef: buildDesktopSlashSessionRef(engine, agentId, sp),
+                sessionRef: buildDesktopSlashSessionRef(eng, agentId, sp),
                 source: "desktop",
                 senderId: "desktop",
                 isOwner: true,
@@ -1955,7 +1969,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
             }
 
             if (msg.type === "compact") {
-              const compactTarget = resolveCompactSessionTarget(engine, msg);
+              const compactTarget = resolveCompactSessionTarget(eng, msg);
               if (!compactTarget.ok) {
                 wsSend(ws, {
                   type: "error",
@@ -1977,8 +1991,8 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                 compactResult("failed", { reason: "agent_deleted", message: "agent_deleted" });
                 return;
               }
-              let session = engine.getSessionByPath(compactPath)
-                || await engine.ensureSessionLoaded?.(compactPath);
+              let session = eng.getSessionByPath(compactPath)
+                || await eng.ensureSessionLoaded?.(compactPath);
               if (!session) {
                 compactResult("failed", { reason: "session_unavailable", message: t("error.noActiveSession") });
                 return;
@@ -1987,7 +2001,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                 compactResult("failed", { reason: "already_compacting", message: t("error.compacting") });
                 return;
               }
-              if (engine.isSessionStreaming(compactPath)) {
+              if (eng.isSessionStreaming(compactPath)) {
                 compactResult("failed", { reason: "session_streaming", message: t("error.waitForReply") });
                 return;
               }
@@ -2001,7 +2015,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                   session,
                   sessionPath: compactPath,
                   customInstructions: undefined,
-                  reloadSessionRuntime: (path) => engine.reloadSessionRuntime?.(path),
+                  reloadSessionRuntime: (path) => eng.reloadSessionRuntime?.(path),
                 });
                 session = compacted.session;
                 compactResult("succeeded");
@@ -2090,14 +2104,14 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                 return;
               }
               if (!interject && (
-                engine.isSessionStreaming(promptSessionPath)
+                eng.isSessionStreaming(promptSessionPath)
                 || agentReviewTurns.hasPendingParent(promptTarget.sessionId)
               )) {
-                wsSend(ws, { type: "error", message: t("error.stillStreaming", { name: engine.agentName }), sessionPath: promptSessionPath });
+                wsSend(ws, { type: "error", message: t("error.stillStreaming", { name: eng.agentName }), sessionPath: promptSessionPath });
                 return;
               }
               // Reject prompt while model switch is in progress
-              if (engine.isSessionSwitching(promptSessionPath)) {
+              if (eng.isSessionSwitching(promptSessionPath)) {
                 wsSend(ws, { type: "error", message: t("chat.modelSwitching"), sessionPath: promptSessionPath });
                 return;
               }
@@ -2115,9 +2129,9 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                 });
                 return;
               }
-              if (interject && engine.isSessionStreaming(promptSessionPath)) {
+              if (interject && eng.isSessionStreaming(promptSessionPath)) {
                 try {
-                  await submitDesktopSessionInterjection(engine, {
+                  await submitDesktopSessionInterjection(eng, {
                     sessionId: promptTarget.sessionId,
                     sessionPath: promptSessionPath,
                     text: promptText,
@@ -2132,7 +2146,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                   wsSend(ws, { type: "steered", sessionPath: promptSessionPath });
                 } catch (err) {
                   const errMessage = err.message === "session_busy"
-                    ? t("error.stillStreaming", { name: engine.agentName })
+                    ? t("error.stillStreaming", { name: eng.agentName })
                     : err.message;
                   wsSend(ws, { type: "error", message: errMessage, sessionPath: promptSessionPath });
                 }
@@ -2159,8 +2173,8 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                   return;
                 }
                 const reviewerAgentId = reviewRequests[0].agentId.trim();
-                const ownerAgentId = engine.getSessionManifest?.(promptTarget.sessionId)?.ownerAgentId || null;
-                if (!engine.getAgent?.(reviewerAgentId) || reviewerAgentId === ownerAgentId) {
+                const ownerAgentId = eng.getSessionManifest?.(promptTarget.sessionId)?.ownerAgentId || null;
+                if (!eng.getAgent?.(reviewerAgentId) || reviewerAgentId === ownerAgentId) {
                   wsSend(ws, {
                     type: "error",
                     code: "invalid_review_agent",
@@ -2194,7 +2208,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
               const sessionRefBlock = buildSessionReferenceBlock(sessionRefs);
               if (sessionRefBlock) promptText = `${promptText}\n\n${sessionRefBlock}`;
               try {
-                await hub.send(promptText, {
+                await h.send(promptText, {
                   sessionId: promptTarget.sessionId,
                   sessionPath: promptSessionPath,
                   clientMessageId: msg.clientMessageId,
@@ -2211,7 +2225,7 @@ export function createChatRoute(engine: any, hub: any, { upgradeWebSocket }: any
                   || (err.type === 'aborted');
                 if (!isUserAbort) {
                   const errMessage = err.message === "session_busy"
-                    ? t("error.stillStreaming", { name: engine.agentName })
+                    ? t("error.stillStreaming", { name: eng.agentName })
                     : err.message;
                   wsSend(ws, { type: "error", message: errMessage, sessionPath: promptSessionPath });
                 }
