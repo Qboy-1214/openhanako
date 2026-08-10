@@ -60,9 +60,8 @@ function escapeHtmlCell(value) {
     .replace(/>/g, "&gt;");
 }
 
-export function createFsRoute(engine) {
+export function createFsRoute(getEngine: (c: any) => any) {
   const route = new Hono();
-  const hanakoHome = path.resolve(engine.hanakoHome);
 
   /**
    * 收集允许的根目录：数据目录 + 全体 agent 的 desk 工作台（用户可能配在数据目录外面）。
@@ -73,8 +72,10 @@ export function createFsRoute(engine) {
    * 本来就允许读的文件，而安全性一点没变。所以根取全体 agent 的并集。
    *
    * 每个请求现算：agent 可以在运行时增删，缓存会把删掉的 desk 留在白名单里。
+   * M1：engine 须为当前请求用户引擎（多用户隔离）。
    */
-  function getAllowedRoots() {
+  function getAllowedRoots(engine) {
+    const hanakoHome = path.resolve(engine.hanakoHome);
     const roots = [hanakoHome];
     for (const entry of engine.listAgents?.() || []) {
       const agent = engine.getAgent?.(entry.id);
@@ -87,9 +88,10 @@ export function createFsRoute(engine) {
 
   // GET /fs/read?path=... → UTF-8 文本
   route.get("/fs/read", async (c) => {
+    const engine = getEngine(c);
     const filePath = c.req.query("path");
     if (!filePath) return c.json({ error: "missing path" }, 400);
-    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots());
+    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots(engine));
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
     }
@@ -100,9 +102,10 @@ export function createFsRoute(engine) {
 
   // GET /fs/read-base64?path=... → base64 编码
   route.get("/fs/read-base64", async (c) => {
+    const engine = getEngine(c);
     const filePath = c.req.query("path");
     if (!filePath) return c.json({ error: "missing path" }, 400);
-    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots());
+    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots(engine));
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
     }
@@ -116,9 +119,10 @@ export function createFsRoute(engine) {
 
   // GET /fs/docx-html?path=... → mammoth 转 HTML
   route.get("/fs/docx-html", async (c) => {
+    const engine = getEngine(c);
     const filePath = c.req.query("path");
     if (!filePath) return c.json({ error: "missing path" }, 400);
-    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots());
+    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots(engine));
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
     }
@@ -137,9 +141,10 @@ export function createFsRoute(engine) {
 
   // GET /fs/xlsx-html?path=... → ExcelJS 转 HTML 表格
   route.get("/fs/xlsx-html", async (c) => {
+    const engine = getEngine(c);
     const filePath = c.req.query("path");
     if (!filePath) return c.json({ error: "missing path" }, 400);
-    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots());
+    const allowedPath = resolveAllowedPath(filePath, getAllowedRoots(engine));
     if (!allowedPath) {
       return c.json({ error: "path not allowed" }, 403);
     }

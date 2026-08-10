@@ -144,13 +144,14 @@ function browserManagerFromOptions(options: Record<string, any>) {
   return options.browserManager || BrowserManager.instance();
 }
 
-export function createPreferencesRoute(engine: any, options: Record<string, any> = {}) {
+export function createPreferencesRoute(getEngine: (c: any) => any, options: Record<string, any> = {}) {
   const { platform = process.platform } = options;
   const route = new Hono();
 
   // 仅供本机桌面启动流程在 server 数据闸门通过后调用。接口刻意保持窄语义：
   // 只比较并删除旧值 false，不接受任意偏好 patch，也不覆盖已经变化的值。
   route.post("/preferences/legacy-gpu-safe-mode/hardware-acceleration", (c) => {
+    const engine = getEngine(c);
     try {
       const settingsDenied = denyWithoutScope(c, "settings.write");
       if (settingsDenied) return settingsDenied;
@@ -163,6 +164,7 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
 
   // 读取全局模型 + 搜索配置
   route.get("/preferences/models", async (c) => {
+    const engine = getEngine(c);
     try {
       const models = engine.getSharedModels();
       const search = engine.getSearchConfig();
@@ -188,7 +190,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
   });
 
   // 更新全局模型 + 搜索配置
-  route.put("/preferences/models", async (c) => {
+  route.put("/preferences/models",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -266,6 +269,7 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
   });
 
   route.get("/preferences/appearance", async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json({ appearance: engine.getAppearance?.() || {} });
     } catch (err) {
@@ -273,7 +277,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/appearance", async (c) => {
+  route.put("/preferences/appearance",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -289,7 +294,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/session-permission-default", async (c) => {
+  route.get("/preferences/session-permission-default",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json({ permissionMode: engine.getSessionPermissionModeDefault?.() || SESSION_PERMISSION_MODES.ASK });
     } catch (err) {
@@ -297,7 +303,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/session-permission-default", async (c) => {
+  route.put("/preferences/session-permission-default",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -319,7 +326,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/notifications", async (c) => {
+  route.get("/preferences/notifications",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json({ notifications: engine.getNotificationPreferences?.() || normalizeNotificationPreferences({}) });
     } catch (err) {
@@ -327,7 +335,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/notifications", async (c) => {
+  route.put("/preferences/notifications",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -344,7 +353,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/quick-chat", async (c) => {
+  route.get("/preferences/quick-chat",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json({ quickChat: engine.getQuickChatPreferences?.() || normalizeQuickChatPreferences({}) });
     } catch (err) {
@@ -352,7 +362,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/quick-chat", async (c) => {
+  route.put("/preferences/quick-chat",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -369,7 +380,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/browser", async (c) => {
+  route.get("/preferences/browser",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json({
         browser: engine.getBrowserPreferences?.() || normalizeBrowserPreferences({}),
@@ -379,7 +391,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/browser", async (c) => {
+  route.put("/preferences/browser",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -399,7 +412,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.post("/preferences/browser/clear-cookies", async (c) => {
+  route.post("/preferences/browser/clear-cookies",   async (c) => {
+    const engine = getEngine(c);
     try {
       const clearBrowserCookiesAndSiteData = options.clearBrowserCookiesAndSiteData
         || (() => browserManagerFromOptions(options).clearBrowserCookiesAndSiteData());
@@ -410,7 +424,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.post("/preferences/setup-complete", async (c) => {
+  route.post("/preferences/setup-complete",   async (c) => {
+    const engine = getEngine(c);
     try {
       const result = typeof engine.markSetupComplete === "function"
         ? engine.markSetupComplete()
@@ -424,7 +439,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/workspace-ui-state", async (c) => {
+  route.get("/preferences/workspace-ui-state",   async (c) => {
+    const engine = getEngine(c);
     try {
       const workspace = normalizeWorkspacePath(c.req.query("workspace"));
       if (!workspace) return c.json({ error: "workspace must be a non-empty path" }, 400);
@@ -439,7 +455,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/workspace-ui-state", async (c) => {
+  route.put("/preferences/workspace-ui-state",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -459,7 +476,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/sidebar-ui", async (c) => {
+  route.get("/preferences/sidebar-ui",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json({ sidebarUi: engine.getSidebarUiPrefs?.() || normalizeSidebarUiPrefs({}) });
     } catch (err) {
@@ -467,7 +485,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/sidebar-ui", async (c) => {
+  route.put("/preferences/sidebar-ui",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -483,7 +502,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/plugin-ui", async (c) => {
+  route.get("/preferences/plugin-ui",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json(engine.getPluginUiPrefs());
     } catch (err) {
@@ -491,7 +511,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/plugin-ui", async (c) => {
+  route.put("/preferences/plugin-ui",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!body || typeof body !== "object") {
@@ -504,7 +525,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.get("/preferences/computer-use", async (c) => {
+  route.get("/preferences/computer-use",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json(await buildComputerUsePreferences(engine, { platform }));
     } catch (err) {
@@ -512,7 +534,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.put("/preferences/computer-use", async (c) => {
+  route.put("/preferences/computer-use",   async (c) => {
+    const engine = getEngine(c);
     try {
       if (!isComputerUsePlatformSupported(platform)) {
         return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);
@@ -533,7 +556,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.post("/preferences/computer-use/request-permissions", async (c) => {
+  route.post("/preferences/computer-use/request-permissions",   async (c) => {
+    const engine = getEngine(c);
     try {
       if (!isComputerUsePlatformSupported(platform)) {
         return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);
@@ -548,7 +572,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.post("/preferences/computer-use/approvals", async (c) => {
+  route.post("/preferences/computer-use/approvals",   async (c) => {
+    const engine = getEngine(c);
     try {
       if (!isComputerUsePlatformSupported(platform)) {
         return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);
@@ -565,7 +590,8 @@ export function createPreferencesRoute(engine: any, options: Record<string, any>
     }
   });
 
-  route.delete("/preferences/computer-use/approvals", async (c) => {
+  route.delete("/preferences/computer-use/approvals",   async (c) => {
+    const engine = getEngine(c);
     try {
       if (!isComputerUsePlatformSupported(platform)) {
         return c.json({ error: "Computer Use is not supported on Linux Preview." }, 400);

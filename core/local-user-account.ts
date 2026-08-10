@@ -116,6 +116,14 @@ export function clearLocalAccountPassword(hanakoHome, {
   return sanitizeAccount(user, { passwordSet: false });
 }
 
+/** M1：按 userId 删除指定用户的本地账号密码凭证（硬删时用） */
+export function removeLocalAccountPasswordForUser(hanakoHome, userId, now = new Date().toISOString()) {
+  const auth = loadLocalUserAuth(hanakoHome);
+  auth.credentials = auth.credentials.filter((credential) => credential.userId !== userId);
+  auth.updatedAt = now;
+  writeSecretJson(path.join(hanakoHome, LOCAL_USER_AUTH_FILE), auth);
+}
+
 export function verifyLocalAccountPassword(hanakoHome, { username, password }: { username?: string; password?: string } = {}) {
   if (!isNonEmptyString(username) || !isNonEmptyString(password)) {
     return { ok: false, reason: "invalid_credentials" };

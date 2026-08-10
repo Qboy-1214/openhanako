@@ -57,6 +57,7 @@ import { resolveHttpRequestPrincipal } from "./http/request-principal.ts";
 import { ensureLocalIdentityRegistries } from "../core/server-identity.ts";
 import { createMobileWorkbenchRoute } from "./routes/mobile-workbench.ts";
 import { registerOpenRoutes } from "./composition/open-root.ts";
+import { userEngineMiddleware } from "./composition/user-engine-middleware.ts";
 import type { CompositionRoot, CompositionContext } from "./composition/contract.ts";
 import { registerTaskRegistryBusHandlers } from "./task-bus-handlers.ts";
 import { registerDeferredResultBusHandlers } from "./deferred-result-bus-handlers.ts";
@@ -434,8 +435,12 @@ export async function startServer(root: CompositionRoot = {}): Promise<void> {
 
   // ── 初始化引擎 ──
   log.log("② 创建 HanaEngine...");
+  // M1 (T2/T13)：全局兜底引擎显式传 systemRoot，与 EngineLifecycle.defaultFactory
+  // 的物理根（<baseDir>/system）保持一致，满足 H1 不变量（全局 + 每用户引擎共用同一 systemRoot）。
+  const baseDir = path.dirname(hanakoHome);
   const engine: any = new HanaEngine({
     hanakoHome,
+    systemRoot: path.join(baseDir, "system"),
     productDir,
     appVersion,
     builtinMediaAdapters: root.builtinMediaAdapters,
@@ -983,6 +988,9 @@ export async function startServer(root: CompositionRoot = {}): Promise<void> {
     appVersion,
     engineLifecycle,
   };
+  // M1 (F1)：每请求按 principal.userId acquire 每用户引擎，挂到 c.get('engine')。
+  // 高敏感路由经 getUserEngine(c) 取它；系统/只读路由回退全局兜底引擎。
+  app.use("*", userEngineMiddleware(engineLifecycle));
   registerOpenRoutes(app, ctx);
   app.route("/api", createMobileWorkbenchRoute(engine));
   root.registerClosedRoutes?.(app, ctx);

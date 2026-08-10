@@ -19,6 +19,7 @@ import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.ts";
 import { t } from "../../lib/i18n.ts";
 import { isSensitivePath } from "../utils/path-security.ts";
+import { assertWithinUserRoot, PathGuardError } from "../../core/multiuser/paths.ts";
 import {
   MAX_CHAT_IMAGE_BASE64_CHARS,
   extensionFromChatImageMime,
@@ -257,10 +258,12 @@ function uniqueUploadName(base, ext) {
   return `${truncateUtf8Bytes(base, maxBaseBytes)}${suffix}${ext}`;
 }
 
-export function createUploadRoute(engine) {
+export function createUploadRoute(getEngine: (c: any) => any) {
   const route = new Hono();
 
   route.post("/upload", async (c) => {
+    const engine = getEngine(c);
+    const principal = c.get("principal");
     const body = await safeJson(c);
     const { paths } = body;
     const sessionPath = normalizeSessionPath(body?.sessionPath);
@@ -295,6 +298,16 @@ export function createUploadRoute(engine) {
         if (!path.isAbsolute(srcPath)) {
           results.push({ src: srcPath, error: "Path must be absolute" });
           continue;
+        }
+        // Task 4 (D1/E1): caller-selected 绝对路径必须落在该用户业务根内
+        try {
+          assertWithinUserRoot(principal?.userId, srcPath, path.dirname(engine.hanakoHome));
+        } catch (err) {
+          if (err instanceof PathGuardError) {
+            results.push({ src: srcPath, error: "path escapes user root" });
+            continue;
+          }
+          throw err;
         }
         let stat;
         try {
@@ -411,6 +424,7 @@ export function createUploadRoute(engine) {
   // Body: { blobs: [{ name, base64Data, mimeType }, ...] }  (also accepts singular { name, base64Data, mimeType })
   // 把内存中的 base64 图片/音频数据落到与 /api/upload 同一个 uploads 目录，输出形态保持一致
   route.post("/upload-blob", async (c) => {
+    const engine = getEngine(c);
     const body = await safeJson(c);
     const sessionPath = normalizeSessionPath(body?.sessionPath);
     let blobs = body?.blobs;

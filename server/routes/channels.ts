@@ -189,10 +189,10 @@ function assertAvailableModelOverride(engine: any, settings: any) {
   throw err;
 }
 
-export function createChannelsRoute(engine: any, hub: any) {
+export function createChannelsRoute(getEngine: (c: any) => any, hub: any) {
   const route = new Hono();
 
-  function isPhoneEnabled() {
+  function isPhoneEnabled(engine) {
     return engine.isChannelsEnabled?.() !== false;
   }
 
@@ -200,17 +200,17 @@ export function createChannelsRoute(engine: any, hub: any) {
     return c.json({ error: "Agent phone is disabled" }, 503);
   }
 
-  function requirePhoneEnabled(c) {
-    return isPhoneEnabled() ? null : phoneDisabledResponse(c);
+  function requirePhoneEnabled(c, engine) {
+    return isPhoneEnabled(engine) ? null : phoneDisabledResponse(c);
   }
 
   /** 用户 bookmark 文件路径 */
-  function userBookmarkPath() {
+  function userBookmarkPath(engine) {
     return path.join(engine.userDir, "channel-bookmarks.md");
   }
 
   /** 安全路径校验：id 不能穿越出 channelsDir */
-  function safeChannelPath(id) {
+  function safeChannelPath(engine, id) {
     const filePath = path.join(engine.channelsDir, `${id}.md`);
     const resolved = path.resolve(filePath);
     const base = path.resolve(engine.channelsDir);
@@ -220,7 +220,7 @@ export function createChannelsRoute(engine: any, hub: any) {
     return resolved;
   }
 
-  function safeAgentDir(agentId) {
+  function safeAgentDir(engine, agentId) {
     if (!agentId || /[/\\]|\.\./.test(agentId)) return null;
     const resolved = path.resolve(path.join(engine.agentsDir, agentId));
     const base = path.resolve(engine.agentsDir);
@@ -230,7 +230,8 @@ export function createChannelsRoute(engine: any, hub: any) {
     return null;
   }
 
-  route.get("/conversations/:id/export", async (c) => {
+  route.get("/conversations/:id/export",   async (c) => {
+    const engine = getEngine(c);
     try {
       const id = c.req.param("id");
       let archive;
@@ -252,7 +253,7 @@ export function createChannelsRoute(engine: any, hub: any) {
           peerAgentId: peerId,
         });
       } else {
-        const filePath = safeChannelPath(id);
+        const filePath = safeChannelPath(engine, id);
         if (!filePath) return c.json({ error: "Invalid channel id" }, 400);
         if (!fs.existsSync(filePath)) return c.json({ error: "Channel not found" }, 404);
         const meta: any = getChannelMeta(filePath);
@@ -274,7 +275,7 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   route.get("/conversations/:id/agent-activities", async (c) => {
-    const disabled = requirePhoneEnabled(c);
+    const disabled = requirePhoneEnabled(c, engine);
     if (disabled) return disabled;
     const id = c.req.param("id");
     return c.json({
@@ -283,13 +284,13 @@ export function createChannelsRoute(engine: any, hub: any) {
     });
   });
 
-  async function readConversationPhoneSettings(id: any, c: any) {
+  async function readConversationPhoneSettings(engine: any, id: any, c: any) {
     if (id.startsWith("dm:")) {
       const agent = resolveConversationOwnerAgent(engine, c);
       const projection = readAgentPhoneProjection(getAgentPhoneProjectionPath(agent.agentDir, id));
       return readDmPhoneSettingsFromMeta(projection.meta || {});
     }
-    const filePath = safeChannelPath(id);
+    const filePath = safeChannelPath(engine, id);
     if (!filePath) {
       const err: any = new Error("Invalid conversation id");
       err.status = 400;
@@ -303,7 +304,7 @@ export function createChannelsRoute(engine: any, hub: any) {
     return readChannelPhoneSettingsFromMeta(getChannelMeta(filePath));
   }
 
-  async function writeConversationPhoneSettings(id: any, settings: any, c: any) {
+  async function writeConversationPhoneSettings(engine: any, id: any, settings: any, c: any) {
     if (id.startsWith("dm:")) {
       const peerId = id.slice(3);
       if (!peerId || /[/\\]|\.\./.test(peerId)) {
@@ -333,7 +334,7 @@ export function createChannelsRoute(engine: any, hub: any) {
       });
       return { ...settings, guardLimit };
     }
-    const filePath = safeChannelPath(id);
+    const filePath = safeChannelPath(engine, id);
     if (!filePath) {
       const err: any = new Error("Invalid conversation id");
       err.status = 400;
@@ -366,54 +367,58 @@ export function createChannelsRoute(engine: any, hub: any) {
     return { ...settings, guardLimit };
   }
 
-  route.get("/conversations/:id/agent-phone-settings", async (c) => {
+  route.get("/conversations/:id/agent-phone-settings",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const id = c.req.param("id");
-      return c.json(await readConversationPhoneSettings(id, c));
+      return c.json(await readConversationPhoneSettings(engine, id, c));
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
     }
   });
 
-  route.post("/conversations/:id/agent-phone-settings", async (c) => {
+  route.post("/conversations/:id/agent-phone-settings",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const id = c.req.param("id");
       const body = await safeJson(c);
       const settings = normalizePhoneSettingsPayload(body);
-      const saved = await writeConversationPhoneSettings(id, settings, c);
+      const saved = await writeConversationPhoneSettings(engine, id, settings, c);
       return c.json({ ok: true, ...(saved || settings) });
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
     }
   });
 
-  route.get("/conversations/:id/agent-phone-tool-mode", async (c) => {
+  route.get("/conversations/:id/agent-phone-tool-mode",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
-      const settings = await readConversationPhoneSettings(c.req.param("id"), c);
+      const settings = await readConversationPhoneSettings(engine, c.req.param("id"), c);
       return c.json({ mode: settings.mode });
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
     }
   });
 
-  route.post("/conversations/:id/agent-phone-tool-mode", async (c) => {
+  route.post("/conversations/:id/agent-phone-tool-mode",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const id = c.req.param("id");
-      const current = await readConversationPhoneSettings(id, c).catch(() => ({
+      const current = await readConversationPhoneSettings(engine, id, c).catch(() => ({
         ...DEFAULT_AGENT_PHONE_SETTINGS,
         mode: DEFAULT_AGENT_PHONE_SETTINGS.toolMode,
       }));
       const body = await safeJson(c);
       const settings = { ...current, mode: normalizeAgentPhoneToolMode(body.mode) };
-      await writeConversationPhoneSettings(id, settings, c);
+      await writeConversationPhoneSettings(engine, id, settings, c);
       return c.json({ ok: true, mode: settings.mode });
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
@@ -421,9 +426,10 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 列出所有频道 ──
-  route.get("/channels", async (c) => {
+  route.get("/channels",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const channelsDir = engine.channelsDir;
       if (!channelsDir || !fs.existsSync(channelsDir)) {
@@ -431,7 +437,7 @@ export function createChannelsRoute(engine: any, hub: any) {
       }
 
       const files = fs.readdirSync(channelsDir).filter(f => f.endsWith(".md"));
-      const bookmarks = readBookmarks(userBookmarkPath());
+      const bookmarks = readBookmarks(userBookmarkPath(engine));
 
       const channels = [];
       for (const f of files) {
@@ -480,9 +486,10 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 创建新频道 ──
-  route.post("/channels", async (c) => {
+  route.post("/channels",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const body = await safeJson(c);
       const { name, description, members, intro } = body;
@@ -498,7 +505,7 @@ export function createChannelsRoute(engine: any, hub: any) {
       }
 
       for (const memberId of normalizedMembers) {
-        if (!safeAgentDir(memberId)) {
+        if (!safeAgentDir(engine, memberId)) {
           return c.json({ error: `Agent not found: ${memberId}`, code: "CHANNEL_AGENT_NOT_FOUND" }, 404);
         }
       }
@@ -521,12 +528,13 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 获取频道消息 ──
-  route.get("/channels/:name", async (c) => {
+  route.get("/channels/:name",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const name = c.req.param("name");
-      const filePath = safeChannelPath(name);
+      const filePath = safeChannelPath(engine, name);
       if (!filePath) return c.json({ error: "Invalid channel id" }, 400);
 
       if (!fs.existsSync(filePath)) {
@@ -552,12 +560,13 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 添加频道成员 ──
-  route.post("/channels/:name/members", async (c) => {
+  route.post("/channels/:name/members",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const name = c.req.param("name");
-      const filePath = safeChannelPath(name);
+      const filePath = safeChannelPath(engine, name);
       if (!filePath) return c.json({ error: "Invalid channel id" }, 400);
       if (!fs.existsSync(filePath)) return c.json({ error: "Channel not found" }, 404);
 
@@ -565,7 +574,7 @@ export function createChannelsRoute(engine: any, hub: any) {
       const memberId = typeof body.memberId === "string" ? body.memberId.trim() : "";
       if (!memberId) return c.json({ error: "memberId is required" }, 400);
 
-      const agentDir = safeAgentDir(memberId);
+      const agentDir = safeAgentDir(engine, memberId);
       if (!agentDir) return c.json({ error: "Agent not found" }, 404);
 
       const members = getChannelMembers(filePath);
@@ -582,13 +591,14 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 移除频道成员 ──
-  route.delete("/channels/:name/members/:memberId", async (c) => {
+  route.delete("/channels/:name/members/:memberId",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const name = c.req.param("name");
       const memberId = c.req.param("memberId");
-      const filePath = safeChannelPath(name);
+      const filePath = safeChannelPath(engine, name);
       if (!filePath) return c.json({ error: "Invalid channel id" }, 400);
       if (!fs.existsSync(filePath)) return c.json({ error: "Channel not found" }, 404);
       if (!memberId || /[/\\]|\.\./.test(memberId)) return c.json({ error: "Invalid member id" }, 400);
@@ -605,7 +615,7 @@ export function createChannelsRoute(engine: any, hub: any) {
       }
 
       await removeChannelMember(filePath, memberId);
-      const agentDir = safeAgentDir(memberId);
+      const agentDir = safeAgentDir(engine, memberId);
       if (agentDir) {
         await removeBookmarkEntry(path.join(agentDir, "channels.md"), name);
       }
@@ -623,12 +633,13 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 用户发送消息 ──
-  route.post("/channels/:name/messages", async (c) => {
+  route.post("/channels/:name/messages",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const name = c.req.param("name");
-      const filePath = safeChannelPath(name);
+      const filePath = safeChannelPath(engine, name);
       if (!filePath) return c.json({ error: "Invalid channel id" }, 400);
 
       const reqBody = await safeJson(c);
@@ -664,12 +675,13 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 更新用户已读 bookmark ──
-  route.post("/channels/:name/read", async (c) => {
+  route.post("/channels/:name/read",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const name = c.req.param("name");
-      const filePath = safeChannelPath(name);
+      const filePath = safeChannelPath(engine, name);
       if (!filePath) return c.json({ error: "Invalid channel id" }, 400);
 
       const body = await safeJson(c);
@@ -679,7 +691,7 @@ export function createChannelsRoute(engine: any, hub: any) {
         return c.json({ error: "timestamp is required" }, 400);
       }
 
-      await updateBookmark(userBookmarkPath(), name, timestamp);
+      await updateBookmark(userBookmarkPath(engine), name, timestamp);
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
@@ -687,12 +699,13 @@ export function createChannelsRoute(engine: any, hub: any) {
   });
 
   // ── 删除频道 ──
-  route.delete("/channels/:name", async (c) => {
+  route.delete("/channels/:name",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const disabled = requirePhoneEnabled(c);
+      const disabled = requirePhoneEnabled(c, engine);
       if (disabled) return disabled;
       const name = c.req.param("name");
-      const filePath = safeChannelPath(name);
+      const filePath = safeChannelPath(engine, name);
       if (!filePath) return c.json({ error: "Invalid channel id" }, 400);
 
       await engine.deleteChannelByName(name);
@@ -709,6 +722,7 @@ export function createChannelsRoute(engine: any, hub: any) {
   // ── 频道开关（唯一入口：engine.setChannelsEnabled）──
   // 写 preferences + 联动 ChannelRouter start/stop 由 config-coordinator 统一处理。
   route.post("/channels/toggle", async (c) => {
+    const engine = getEngine(c);
     const body = await safeJson(c);
     const { enabled } = body;
     await engine.setChannelsEnabled(!!enabled);

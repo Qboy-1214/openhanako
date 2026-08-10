@@ -61,7 +61,7 @@ function installErrorMessage(err, sourcePath) {
   }
 }
 
-export function createSkillsRoute(engine) {
+export function createSkillsRoute(getEngine: (c: any) => any) {
   const route = new Hono();
 
   // 安装/删除/reload 共享互斥锁，防止 reloadSkills() 并发导致 500
@@ -110,7 +110,7 @@ export function createSkillsRoute(engine) {
   // has to say which agent it means: answering for whichever agent the server
   // was focused on showed one client the other client's switches, and let a
   // write be validated against an agent the caller never named.
-  function resolveBundleSkillView(c) {
+  function resolveBundleSkillView(engine, c) {
     const agentId = c.req.query("agentId") || "";
     if (!agentId) {
       const err: any = new Error("agentId required");
@@ -138,14 +138,14 @@ export function createSkillsRoute(engine) {
     }
   }
 
-  function validateAgentIdOrResponse(c, id) {
+  function validateAgentIdOrResponse(engine, c, id) {
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
     }
     return null;
   }
 
-  async function persistEnabledSkills(agentId, enabled) {
+  async function persistEnabledSkills(engine, agentId, enabled) {
     const partial = { skills: { enabled } };
 
     // 走 engine.updateConfig (ConfigCoordinator)，它会在 partial.skills 存在时
@@ -161,7 +161,7 @@ export function createSkillsRoute(engine) {
     return enabled;
   }
 
-  function visibleSkillsForAgent(agentId) {
+  function visibleSkillsForAgent(engine, agentId) {
     const skills = engine.getAllSkills(agentId) || [];
     return {
       skills,
@@ -169,10 +169,10 @@ export function createSkillsRoute(engine) {
     };
   }
 
-  async function writeSkillDelta(agentId, skillNames, enable) {
+  async function writeSkillDelta(engine, agentId, skillNames, enable) {
     const requested = [...new Set(skillNames.filter(name => typeof name === "string" && name.trim()))];
     return withAgentSkillWriteLock(agentId, async () => {
-      const { skills, visibleSet } = visibleSkillsForAgent(agentId);
+      const { skills, visibleSet } = visibleSkillsForAgent(engine, agentId);
       const changed = requested.filter(name => visibleSet.has(name));
       const currentEnabled = new Set(skills.filter(skill => skill.enabled).map(skill => skill.name));
       if (enable) {
@@ -183,15 +183,16 @@ export function createSkillsRoute(engine) {
       const enabled = skills
         .map(skill => skill.name)
         .filter(name => currentEnabled.has(name));
-      await persistEnabledSkills(agentId, enabled);
+      await persistEnabledSkills(engine, agentId, enabled);
       emitAppEvent(engine, "skills-changed", { agentId });
       return { enabled, changed };
     });
   }
 
-  route.get("/skills/bundles", async (c) => {
+  route.get("/skills/bundles",   async (c) => {
+    const engine = getEngine(c);
     try {
-      const { skillByName } = resolveBundleSkillView(c);
+      const { skillByName } = resolveBundleSkillView(engine, c);
       const store = loadSkillBundleStore(engine);
       const bundles = store.bundles.map(bundle => bundleForResponse(bundle, skillByName));
       return c.json({ bundles });
@@ -200,10 +201,11 @@ export function createSkillsRoute(engine) {
     }
   });
 
-  route.post("/skills/bundles", async (c) => {
+  route.post("/skills/bundles",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
-      const { skillByName } = resolveBundleSkillView(c);
+      const { skillByName } = resolveBundleSkillView(engine, c);
       assertBundleSkillsInstalled(body.skillNames, skillByName);
       const bundle = createSkillBundle(engine, {
         name: body.name,
@@ -216,13 +218,14 @@ export function createSkillsRoute(engine) {
     }
   });
 
-  route.put("/skills/bundles/order", async (c) => {
+  route.put("/skills/bundles/order",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       if (!Array.isArray(body.bundleIds)) {
         return c.json({ error: "bundleIds must be an array" }, 400);
       }
-      const { skillByName } = resolveBundleSkillView(c);
+      const { skillByName } = resolveBundleSkillView(engine, c);
       const store = reorderSkillBundles(engine, body.bundleIds);
       emitAppEvent(engine, "skills-changed", { agentId: null });
       return c.json({ ok: true, bundles: store.bundles.map(bundle => bundleForResponse(bundle, skillByName)) });
@@ -232,10 +235,11 @@ export function createSkillsRoute(engine) {
     }
   });
 
-  route.put("/skills/bundles/:id", async (c) => {
+  route.put("/skills/bundles/:id",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
-      const { skillByName } = resolveBundleSkillView(c);
+      const { skillByName } = resolveBundleSkillView(engine, c);
       if (Array.isArray(body.skillNames)) {
         assertBundleSkillsInstalled(body.skillNames, skillByName);
       }
@@ -250,7 +254,8 @@ export function createSkillsRoute(engine) {
     }
   });
 
-  route.delete("/skills/bundles/:id", async (c) => {
+  route.delete("/skills/bundles/:id",   async (c) => {
+    const engine = getEngine(c);
     try {
       const deleted = deleteSkillBundle(engine, c.req.param("id"));
       if (!deleted) return c.json({ error: "skill bundle not found" }, 404);
@@ -261,7 +266,8 @@ export function createSkillsRoute(engine) {
     }
   });
 
-  route.post("/skills/bundles/:id/export", async (c) => {
+  route.post("/skills/bundles/:id/export",   async (c) => {
+    const engine = getEngine(c);
     try {
       const result = await exportSkillBundlePackage(engine, c.req.param("id"));
       return c.json(result);
@@ -270,7 +276,8 @@ export function createSkillsRoute(engine) {
     }
   });
 
-  route.get("/skills", async (c) => {
+  route.get("/skills",   async (c) => {
+    const engine = getEngine(c);
     try {
       const agentId = c.req.query("agentId");
       const runtime = c.req.query("runtime") === "1";
@@ -292,7 +299,7 @@ export function createSkillsRoute(engine) {
 
   route.put("/agents/:id/skills", async (c) => {
     const id = c.req.param("id");
-    const invalidAgent = validateAgentIdOrResponse(c, id);
+    const invalidAgent = validateAgentIdOrResponse(engine, c, id);
     if (invalidAgent) return invalidAgent;
     try {
       const body = await safeJson(c);
@@ -308,7 +315,7 @@ export function createSkillsRoute(engine) {
       const filtered = enabled.filter(name => visibleSet.has(name));
 
       const persisted = await withAgentSkillWriteLock(id, async () => {
-        await persistEnabledSkills(id, filtered);
+        await persistEnabledSkills(engine, id, filtered);
         emitAppEvent(engine, "skills-changed", { agentId: id });
         return filtered;
       });
@@ -320,7 +327,7 @@ export function createSkillsRoute(engine) {
 
   route.patch("/agents/:id/skills/:name", async (c) => {
     const id = c.req.param("id");
-    const invalidAgent = validateAgentIdOrResponse(c, id);
+    const invalidAgent = validateAgentIdOrResponse(engine, c, id);
     if (invalidAgent) return invalidAgent;
     try {
       const body = await safeJson(c);
@@ -328,11 +335,11 @@ export function createSkillsRoute(engine) {
         return c.json({ error: "enabled must be a boolean" }, 400);
       }
       const name = c.req.param("name");
-      const { visibleSet } = visibleSkillsForAgent(id);
+      const { visibleSet } = visibleSkillsForAgent(engine, id);
       if (!visibleSet.has(name)) {
         return c.json({ error: "skill not found" }, 404);
       }
-      const result = await writeSkillDelta(id, [name], body.enabled);
+      const result = await writeSkillDelta(engine, id, [name], body.enabled);
       return c.json({ ok: true, ...result });
     } catch (err) {
       return c.json({ error: err.message }, 500);
@@ -341,7 +348,7 @@ export function createSkillsRoute(engine) {
 
   route.patch("/agents/:id/skill-bundles/:bundleId", async (c) => {
     const id = c.req.param("id");
-    const invalidAgent = validateAgentIdOrResponse(c, id);
+    const invalidAgent = validateAgentIdOrResponse(engine, c, id);
     if (invalidAgent) return invalidAgent;
     try {
       const body = await safeJson(c);
@@ -353,7 +360,7 @@ export function createSkillsRoute(engine) {
       if (!bundle) {
         return c.json({ error: "skill bundle not found" }, 404);
       }
-      const result = await writeSkillDelta(id, bundle.skillNames, body.enabled);
+      const result = await writeSkillDelta(engine, id, bundle.skillNames, body.enabled);
       return c.json({ ok: true, ...result });
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
@@ -361,7 +368,8 @@ export function createSkillsRoute(engine) {
   });
 
   // ── 安装用户技能 ──
-  route.post("/skills/install", async (c) => {
+  route.post("/skills/install",   async (c) => {
+    const engine = getEngine(c);
     return withInstallLock(async () => {
     let uploadedSource = null;
     try {
@@ -445,7 +453,8 @@ export function createSkillsRoute(engine) {
   });
 
   // ── 外部兼容技能路径 ──
-  route.get("/skills/external-paths", async (c) => {
+  route.get("/skills/external-paths",   async (c) => {
+    const engine = getEngine(c);
     try {
       return c.json(engine.getExternalSkillPaths());
     } catch (err) {
@@ -453,7 +462,8 @@ export function createSkillsRoute(engine) {
     }
   });
 
-  route.put("/skills/external-paths", async (c) => {
+  route.put("/skills/external-paths",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { paths } = body;
@@ -477,7 +487,8 @@ export function createSkillsRoute(engine) {
   });
 
   // ── 删除技能 ──
-  route.delete("/skills/:name", async (c) => {
+  route.delete("/skills/:name",   async (c) => {
+    const engine = getEngine(c);
     return withInstallLock(async () => {
     try {
       const name = c.req.param("name");
@@ -546,7 +557,8 @@ export function createSkillsRoute(engine) {
   });
 
   // POST /skills/reload — 强制重新加载所有技能
-  route.post("/skills/reload", async (c) => {
+  route.post("/skills/reload",   async (c) => {
+    const engine = getEngine(c);
     return withInstallLock(async () => {
     try {
       await engine.reloadSkills();

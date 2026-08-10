@@ -122,7 +122,10 @@ export class EngineLifecycle {
     const idle = this.opts.idleMs ?? DEFAULT_IDLE_MS;
     const now = Date.now();
     for (const h of this.handles.values()) {
-      if (h.state === "ready" && h.refCount > 0 && now - h.lastActivityAt > idle) {
+      // R6 修复：移除 `refCount > 0` 限制——只要引擎处于 ready 且 idle 超时即回收，
+      // 使 refCount===0（请求/WS 全部释放）的引擎也能被回收。WS 挂着时由 keepAlive 续命
+      // （lastActivityAt 被刷新），不会在 idle 内误回收。
+      if (h.state === "ready" && now - h.lastActivityAt > idle) {
         await this.disposeHandle(h);
       }
     }

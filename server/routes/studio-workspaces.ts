@@ -14,10 +14,11 @@ import { createApiResourceOperationContext, requestIdFromHono } from "../http/re
 import { recordSecurityAuditEvent } from "../http/security-audit.ts";
 import { isLocalOwnerPrincipal } from "../http/route-security.ts";
 
-export function createStudioWorkspacesRoute(engine) {
+export function createStudioWorkspacesRoute(getEngine: (c: any) => any) {
   const route = new Hono();
 
   route.get("/studio/workspaces", async (c) => {
+    const engine = getEngine(c);
     try {
       const auth = authorizeStudioWorkspace(c, engine, "files.read");
       if (auth.response) return auth.response;
@@ -28,6 +29,7 @@ export function createStudioWorkspacesRoute(engine) {
   });
 
   route.get("/studio/workspaces/:mountId/files", async (c) => {
+    const engine = getEngine(c);
     try {
       const auth = authorizeStudioWorkspace(c, engine, "files.read");
       if (auth.response) return auth.response;
@@ -40,6 +42,7 @@ export function createStudioWorkspacesRoute(engine) {
   });
 
   route.post("/studio/workspaces", async (c) => {
+    const engine = getEngine(c);
     const auth = authorizeStudioWorkspace(c, engine, "files.write");
     if (auth.response) return auth.response;
     if (!isLocalOwnerPrincipal(auth.requestContext?.authPrincipal)) {
@@ -72,6 +75,7 @@ export function createStudioWorkspacesRoute(engine) {
   });
 
   route.delete("/studio/workspaces/:mountId", async (c) => {
+    const engine = getEngine(c);
     const auth = authorizeStudioWorkspace(c, engine, "files.write");
     if (auth.response) return auth.response;
     if (!isLocalOwnerPrincipal(auth.requestContext?.authPrincipal)) {

@@ -32,9 +32,10 @@ async function recordDecision(engine: any, sourceSessionId: string, decision: an
   }
 }
 
-export function createSessionCollabRoute(engine: any) {
+export function createSessionCollabRoute(getEngine: (c: any) => any) {
   const route = new Hono();
   route.post("/session-collab/apply", async (c) => {
+    const engine = getEngine(c);
     const store = engine.sessionCollabDraftStore || null;
     if (!store) return c.json({ error: "draft store unavailable" }, 500);
     let body: any = null;
@@ -94,6 +95,7 @@ export function createSessionCollabRoute(engine: any) {
   });
 
   route.post("/session-collab/reject", async (c) => {
+    const engine = getEngine(c);
     const store = engine.sessionCollabDraftStore || null;
     if (!store) return c.json({ error: "draft store unavailable" }, 500);
     let body: any = null;

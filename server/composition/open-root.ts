@@ -12,16 +12,19 @@
  * closed-product, see build/open-boundary-baseline.json), and this file
  * must not silently reclassify it by absorbing its mount call.
  *
- * ── M0 多用户范围声明（GRILL Q11-A 最小骨架验证）──
- * 本文件挂载的所有 open 路由在 M0 仍走 `ctx.engine`（系统级兜底引擎），
- * 未逐个改为按 userId 从 `ctx.engineLifecycle` 取引擎。原因：全量按用户
- * 引擎接管需架构级统一 `hanakoHome`→system 根模型（现状 dev:web 的
- * hanakoHome 是单用户实际 home），推迟到 M1。
- * M0 已验证的多用户能力：注册/登录/登出（web-auth，账号与密码落 system
- * 共享）、每用户 `users/<userId>/` 业务 home 隔离（register 创建）、
- * SYSTEM_ADMIN 首用户 + 注册锁、EngineLifecycle 引用计数 + WS 静默计时机制
- * （单测通过，经 `ctx.engineLifecycle` 暴露）。业务数据隔离由
- * `users/<userId>/` 目录天然实现。
+ * ── M1 多用户范围声明（已接管高敏感业务路由）──
+ * 高敏感业务路由（chat/sessions/session-collab/session-projects/agents/upload/fs/
+ * preferences/skills/channels/dm/studio-workspaces）在请求时经 `getUserEngine(c)`
+ * 从 `c.get('engine')`（userEngineMiddleware 按 principal.userId acquire 的每用户引擎）
+ * 取引擎；未命中时回退全局兜底引擎（`ctx.engine`，承载系统/只读路由）。system/只读路由
+ * 仍走 `ctx.engine`。
+ * 双根模型：`用户引擎.hanakoHome = <baseDir>/users/<userId>`，`systemRoot = <baseDir>/system`，
+ * 全局兜底引擎的 systemRoot 同样为 `<baseDir>/system`（H1 不变量，见 core/engine-lifecycle.ts
+ * 的 defaultFactory 与 server/index.ts 的 new HanaEngine）。
+ * M1 新增能力：按用户引擎隔离（userEngineMiddleware + EngineLifecycle）、path-guard
+ * （assertWithinUserRoot 于 upload/fs 边界）、账号软删/硬删 + 末位管理员防护、双根单测。
+ * 已知限制：chat 路由的引擎隔离在 M1 仅 HTTP 部分走 getUserEngine，WS 部分（含
+ * AgentReviewTurnCoordinator 单例）仍用全局兜底引擎，待后续迭代（见 plan Task 3）。
  */
 import type { Hono } from "hono";
 import type { CompositionContext } from "./contract.ts";
@@ -89,6 +92,12 @@ export function registerOpenRoutes(app: Hono, ctx: CompositionContext): void {
     appVersion,
   } = ctx;
 
+  // M1 F1: 高敏感路由在请求时按用户解析引擎；userEngineMiddleware 把每用户引擎挂到 c.get('engine')，
+  // 未命中时回退全局兜底引擎（系统/只读路由仍用 ctx.engine）。
+  const getUserEngine = (c: any) => c.get("engine") ?? engine;
+
+  // chat 路由的引擎隔离在 M1 Task 3 单独处理（WS 经 bindEngineToWs 走 ws.engine，
+  // 工厂级单例 AgentReviewTurnCoordinator 需重新设计来源），此处暂用全局兜底引擎（M0 行为）。
   const { restRoute: chatRestRoute, wsRoute: chatWsRoute } = createChatRoute(engine, hub, { upgradeWebSocket });
   app.route("", createMobileStaticRoute(decideMobileStaticRouteOptions()));
   app.route("", createHtmlPreviewRoute());
@@ -105,21 +114,21 @@ export function registerOpenRoutes(app: Hono, ctx: CompositionContext): void {
     engine,
     runtimeState: serverRuntimeState,
   } as any));
-  app.route("/api", createSessionsRoute(engine, hub));
-  app.route("/api", createSessionCollabRoute(engine));
-  app.route("/api", createSessionProjectsRoute(engine));
+  app.route("/api", createSessionsRoute(getUserEngine, hub));
+  app.route("/api", createSessionCollabRoute(getUserEngine));
+  app.route("/api", createSessionProjectsRoute(getUserEngine));
   app.route("/api", createModelsRoute(engine));
   app.route("/api", createConfigRoute(engine));
-  app.route("/api", createUploadRoute(engine));
+  app.route("/api", createUploadRoute(getUserEngine));
   app.route("/api", createProvidersRoute(engine));
-  app.route("/api", createAgentsRoute(engine));
+  app.route("/api", createAgentsRoute(getUserEngine));
   app.route("/api", createDevicesRoute(engine));
-  app.route("/api", createStudioWorkspacesRoute(engine));
-  app.route("/api", createSkillsRoute(engine));
-  app.route("/api", createChannelsRoute(engine, hub));
-  app.route("/api", createDmRoute(engine, hub));
-  app.route("/api", createFsRoute(engine));
-  app.route("/api", createPreferencesRoute(engine));
+  app.route("/api", createStudioWorkspacesRoute(getUserEngine));
+  app.route("/api", createSkillsRoute(getUserEngine));
+  app.route("/api", createChannelsRoute(getUserEngine, hub));
+  app.route("/api", createDmRoute(getUserEngine, hub));
+  app.route("/api", createFsRoute(getUserEngine));
+  app.route("/api", createPreferencesRoute(getUserEngine));
   app.route("/api", createInputDraftsRoute(engine));
   app.route("/api", createSettingsSnapshotRoute(engine, {
     bridgeManagerRef,

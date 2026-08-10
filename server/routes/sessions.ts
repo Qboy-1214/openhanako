@@ -351,11 +351,11 @@ async function readSessionFileRevision(sessionPath) {
   }
 }
 
-export function createSessionsRoute(engine, hub = null) {
+export function createSessionsRoute(getEngine: (c: any) => any, hub = null) {
   const route = new Hono();
   const lifecycleLocks = new Map();
 
-  function resolveSessionCacheLocator(sessionPath) {
+  function resolveSessionCacheLocator(engine, sessionPath) {
     if (!sessionPath) return { cacheKey: null, readPath: null, sessionId: null };
     const sessionId = engine.getSessionIdForPath?.(sessionPath) || null;
     const manifest = sessionId ? engine.getSessionManifest?.(sessionId) || null : null;
@@ -369,14 +369,14 @@ export function createSessionsRoute(engine, hub = null) {
     };
   }
 
-  function currentSessionPathForId(sessionId) {
+  function currentSessionPathForId(engine, sessionId) {
     if (!sessionId) return null;
     const manifest = engine.getSessionManifest?.(sessionId) || null;
     const currentPath = manifest?.currentLocator?.path;
     return typeof currentPath === "string" && currentPath ? currentPath : null;
   }
 
-  function resolveSubagentBlockSession(block, task = null, run = null) {
+  function resolveSubagentBlockSession(engine, block, task = null, run = null) {
     const rawSessionId =
       block?.sessionId
       || task?.meta?.sessionId
@@ -393,18 +393,18 @@ export function createSessionsRoute(engine, hub = null) {
       sessionId = engine.getSessionIdForPath?.(sessionPath) || null;
     }
     if (sessionId) {
-      sessionPath = currentSessionPathForId(sessionId) || sessionPath;
+      sessionPath = currentSessionPathForId(engine, sessionId) || sessionPath;
     }
     return { sessionId, sessionPath };
   }
 
   // session-meta.json sidecar 按 session 目录共享；同一个 request 里遍历几十个 block
   // 时不必每个 block 都重复 readFileSync + JSON.parse。调用端构造一次 Map 当 cache。
-  function createSubagentMetaCache() {
+  function createSubagentMetaCache(engine) {
     const map = new Map();
     return (sessionPath) => {
       if (!sessionPath) return null;
-      const { cacheKey, readPath, sessionId } = resolveSessionCacheLocator(sessionPath);
+      const { cacheKey, readPath, sessionId } = resolveSessionCacheLocator(engine, sessionPath);
       if (!cacheKey || !readPath) return null;
       if (map.has(cacheKey)) return map.get(cacheKey);
       const manifestMeta = normalizeExecutorMetadata(
@@ -416,8 +416,8 @@ export function createSessionsRoute(engine, hub = null) {
     };
   }
 
-  function applySubagentIdentity(block, task, readSessionMeta) {
-    const sessionRef = resolveSubagentBlockSession(block, task);
+  function applySubagentIdentity(engine, block, task, readSessionMeta) {
+    const sessionRef = resolveSubagentBlockSession(engine, block, task);
     if (sessionRef.sessionId && !block.sessionId) block.sessionId = sessionRef.sessionId;
     if (sessionRef.sessionPath) block.streamKey = sessionRef.sessionPath;
     const sessionPath = sessionRef.sessionPath;
@@ -443,8 +443,8 @@ export function createSessionsRoute(engine, hub = null) {
     block.agentName = inferredAgent?.agentName || "Unknown agent";
   }
 
-  function patchBlockExecutorMetadata(block, task, readSessionMeta) {
-    const sessionRef = resolveSubagentBlockSession(block, task);
+  function patchBlockExecutorMetadata(engine, block, task, readSessionMeta) {
+    const sessionRef = resolveSubagentBlockSession(engine, block, task);
     if (sessionRef.sessionId && !block.sessionId) block.sessionId = sessionRef.sessionId;
     if (sessionRef.sessionPath) block.streamKey = sessionRef.sessionPath;
     const sessionPath = sessionRef.sessionPath;
@@ -519,7 +519,7 @@ export function createSessionsRoute(engine, hub = null) {
     const map = new Map();
     return async (sessionPath) => {
       if (!sessionPath) return null;
-      const { cacheKey, readPath } = resolveSessionCacheLocator(sessionPath);
+      const { cacheKey, readPath } = resolveSessionCacheLocator(engine, sessionPath);
       if (!cacheKey || !readPath) return null;
       if (!map.has(cacheKey)) {
         map.set(cacheKey, loadLatestAssistantSummaryFromSessionFile(readPath));
@@ -528,7 +528,7 @@ export function createSessionsRoute(engine, hub = null) {
     };
   }
 
-  function getSessionSummaryRecord(sessionPath, agentIdHint = null) {
+  function getSessionSummaryRecord(engine, sessionPath, agentIdHint = null) {
     if (!sessionPath) return null;
     const agentId = agentIdHint || engine.resolveSessionOwnership?.(sessionPath)?.agentId || null;
     if (!agentId) return null;
@@ -551,7 +551,7 @@ export function createSessionsRoute(engine, hub = null) {
     };
   }
 
-  function invalidateRcTarget(sessionPath) {
+  function invalidateRcTarget(engine, sessionPath) {
     const rcState = engine.rcState;
     if (!rcState?.invalidateDesktopSession) return;
 
@@ -777,7 +777,7 @@ export function createSessionsRoute(engine, hub = null) {
       } catch (err) {
         lifecycleLog.warn(`terminal cleanup failed for ${sessionPath}: ${err.message}`);
       }
-      invalidateRcTarget(sessionPath);
+      invalidateRcTarget(engine, sessionPath);
     }
   }
 
@@ -881,7 +881,8 @@ export function createSessionsRoute(engine, hub = null) {
   }
 
   // 列出所有 agent 的历史 session
-  route.get("/sessions", async (c) => {
+  route.get("/sessions",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const auth = authorizeSessionRoute(requestContext, "sessions.read", {
@@ -909,7 +910,7 @@ export function createSessionsRoute(engine, hub = null) {
         },
       ]));
       return c.json(sessions.map(s => {
-        const summaryRecord = getSessionSummaryRecord(s.path, s.agentId || null);
+        const summaryRecord = getSessionSummaryRecord(engine, s.path, s.agentId || null);
         return ({
           path: s.path,
           sessionId: s.sessionId || engine.getSessionIdForPath?.(s.path) || null,
@@ -951,7 +952,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.get("/sessions/search", async (c) => {
+  route.get("/sessions/search",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const auth = authorizeSessionRoute(requestContext, "sessions.read", {
@@ -1016,7 +1018,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.get("/sessions/find", async (c) => {
+  route.get("/sessions/find",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const querySessionId = c.req.query("sessionId") || null;
@@ -1083,7 +1086,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 获取单个 session 的滚动摘要。列表只暴露 hasSummary，正文按需读取。
-  route.get("/sessions/summary", async (c) => {
+  route.get("/sessions/summary",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const sessionPath = c.req.query("path") || null;
@@ -1100,7 +1104,7 @@ export function createSessionsRoute(engine, hub = null) {
       });
       if (!auth.allowed) return c.json({ error: "insufficient_scope", reason: auth.reason }, 403);
 
-      const record = getSessionSummaryRecord(sessionPath);
+      const record = getSessionSummaryRecord(engine, sessionPath);
       return c.json(serializeSessionSummaryRecord(record));
     } catch (err) {
       return c.json({ error: err.message }, err.status || 500);
@@ -1108,7 +1112,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 置顶 / 取消置顶 session
-  route.post("/sessions/pin", async (c) => {
+  route.post("/sessions/pin",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -1146,7 +1151,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 重排置顶区：提交完整有序的 sessionId 列表，服务端整体重新编号
-  route.post("/sessions/pin-order", async (c) => {
+  route.post("/sessions/pin-order",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -1192,7 +1198,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.get("/sessions/authorized-folders", async (c) => {
+  route.get("/sessions/authorized-folders",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const sessionPath = c.req.query("path") || engine.currentSessionPath || null;
@@ -1220,7 +1227,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.patch("/sessions/authorized-folders", async (c) => {
+  route.patch("/sessions/authorized-folders",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -1273,7 +1281,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 获取 session 的消息（支持 ?path= 指定 session，否则读焦点 session）
-  route.get("/sessions/messages", async (c) => {
+  route.get("/sessions/messages",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const querySessionId = c.req.query("sessionId") || null;
@@ -1660,7 +1669,7 @@ export function createSessionsRoute(engine, hub = null) {
       {
         const deferredStore = engine.deferredResults;
         const runStore = engine.subagentRuns;
-        const readSessionMeta = createSubagentMetaCache();
+        const readSessionMeta = createSubagentMetaCache(engine);
         const readSessionSummary = createSubagentSummaryCache();
         for (const b of slicedBlocks) {
           if (b.type !== "subagent" || !b.taskId) continue;
@@ -1677,13 +1686,13 @@ export function createSessionsRoute(engine, hub = null) {
           if (!b.streamKey && durableSessionPath) b.streamKey = durableSessionPath;
           if (!b.streamKey && deferredSessionPath) b.streamKey = deferredSessionPath;
           {
-            const sessionRef = resolveSubagentBlockSession(b, metadataTask, run);
+            const sessionRef = resolveSubagentBlockSession(engine, b, metadataTask, run);
             if (sessionRef.sessionId && !b.sessionId) b.sessionId = sessionRef.sessionId;
             if (sessionRef.sessionPath) b.streamKey = sessionRef.sessionPath;
           }
           patchBlockRequestedMetadata(b, metadataTask);
-          patchBlockExecutorMetadata(b, metadataTask, readSessionMeta);
-          applySubagentIdentity(b, metadataTask, readSessionMeta);
+          patchBlockExecutorMetadata(engine, b, metadataTask, readSessionMeta);
+          applySubagentIdentity(engine, b, metadataTask, readSessionMeta);
 
           if (b.streamStatus !== "running") continue;
 
@@ -1696,8 +1705,8 @@ export function createSessionsRoute(engine, hub = null) {
             b.summary = terminalTask.reason || "aborted";
             if (terminalTask.meta?.sessionPath) b.streamKey = terminalTask.meta.sessionPath;
             patchBlockRequestedMetadata(b, terminalTask);
-            patchBlockExecutorMetadata(b, terminalTask, readSessionMeta);
-            applySubagentIdentity(b, terminalTask, readSessionMeta);
+            patchBlockExecutorMetadata(engine, b, terminalTask, readSessionMeta);
+            applySubagentIdentity(engine, b, terminalTask, readSessionMeta);
             continue;
           }
           if (terminalTask?.status === "failed") {
@@ -1705,16 +1714,16 @@ export function createSessionsRoute(engine, hub = null) {
             b.summary = terminalTask.reason || "failed";
             if (terminalTask.meta?.sessionPath) b.streamKey = terminalTask.meta.sessionPath;
             patchBlockRequestedMetadata(b, terminalTask);
-            patchBlockExecutorMetadata(b, terminalTask, readSessionMeta);
-            applySubagentIdentity(b, terminalTask, readSessionMeta);
+            patchBlockExecutorMetadata(engine, b, terminalTask, readSessionMeta);
+            applySubagentIdentity(engine, b, terminalTask, readSessionMeta);
             continue;
           }
           if (terminalTask?.status === "resolved") {
             b.streamStatus = "done";
             if (terminalTask.meta?.sessionPath) b.streamKey = terminalTask.meta.sessionPath;
             patchBlockRequestedMetadata(b, terminalTask);
-            patchBlockExecutorMetadata(b, terminalTask, readSessionMeta);
-            applySubagentIdentity(b, terminalTask, readSessionMeta);
+            patchBlockExecutorMetadata(engine, b, terminalTask, readSessionMeta);
+            applySubagentIdentity(engine, b, terminalTask, readSessionMeta);
 
             const sp = b.streamKey || terminalTask.meta?.sessionPath || null;
             const summary = await readSessionSummary(sp);
@@ -1779,7 +1788,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.post("/sessions/latest-user-message/replay", async (c) => {
+  route.post("/sessions/latest-user-message/replay",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -1821,7 +1831,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.post("/sessions/turns/retry", async (c) => {
+  route.post("/sessions/turns/retry",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -1867,7 +1878,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.post("/sessions/fork", async (c) => {
+  route.post("/sessions/fork",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -1943,7 +1955,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.post("/sessions/todos/complete", async (c) => {
+  route.post("/sessions/todos/complete",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -2000,7 +2013,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 新建 session（可选指定工作目录和 agentId）
-  route.post("/sessions/new", async (c) => {
+  route.post("/sessions/new",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const auth = authorizeSessionRoute(requestContext, "sessions.write", {
@@ -2112,7 +2126,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.post("/sessions/new-detached", async (c) => {
+  route.post("/sessions/new-detached",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const auth = authorizeSessionRoute(requestContext, "sessions.write", {
@@ -2211,7 +2226,8 @@ export function createSessionsRoute(engine, hub = null) {
     }
   });
 
-  route.post("/sessions/continue-deleted-agent", async (c) => {
+  route.post("/sessions/continue-deleted-agent",   async (c) => {
+    const engine = getEngine(c);
     try {
       const requestContext = createRequestContext(c, engine);
       const body = await safeJson(c);
@@ -2273,7 +2289,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 切换 session（支持跨 agent）
-  route.post("/sessions/switch", async (c) => {
+  route.post("/sessions/switch",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { sessionId, path: legacySessionPath, currentSessionPath: oldSessionPath } = body;
@@ -2380,7 +2397,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 显式更新 Agent 能力：fresh compact 压缩旧对话，再用当前配置重建 prompt/工具快照。
-  route.post("/sessions/fresh-compact", async (c) => {
+  route.post("/sessions/fresh-compact",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { path: sessionPath } = body || {};
@@ -2442,7 +2460,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 重命名 session
-  route.post("/sessions/rename", async (c) => {
+  route.post("/sessions/rename",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { path: sessionPath, title } = body;
@@ -2466,7 +2485,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 清理过期归档 session
-  route.post("/sessions/cleanup", async (c) => {
+  route.post("/sessions/cleanup",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { maxAgeDays = 90 } = body;
@@ -2504,7 +2524,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 列出所有已归档 session（聚合各 agent 的 archived/ 目录）
-  route.get("/sessions/archived", async (c) => {
+  route.get("/sessions/archived",   async (c) => {
+    const engine = getEngine(c);
     try {
       const list = await engine.listArchivedSessions();
       return c.json(list);
@@ -2514,7 +2535,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 归档 session（支持跨 agent）
-  route.post("/sessions/archive", async (c) => {
+  route.post("/sessions/archive",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const sessionRef = resolveSessionLocatorFromBody(body, "archiveSession");
@@ -2586,7 +2608,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 恢复归档 session → 移回 sessions/
-  route.post("/sessions/restore", async (c) => {
+  route.post("/sessions/restore",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const sessionRef = resolveSessionLocatorFromBody(body, "restoreSession");
@@ -2652,7 +2675,8 @@ export function createSessionsRoute(engine, hub = null) {
   });
 
   // 永久删除一条归档 session
-  route.post("/sessions/archived/delete", async (c) => {
+  route.post("/sessions/archived/delete",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const sessionRef = resolveSessionLocatorFromBody(body, "deleteArchivedSession");

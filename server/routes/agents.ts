@@ -233,14 +233,15 @@ function emitAgentConfigAppEvents(engine, agentId, { globalFields, agentPartial,
 
 // 本地应用，API key 不做掩码，前端用 type="password" 控制显隐
 
-export function createAgentsRoute(engine) {
+export function createAgentsRoute(getEngine: (c: any) => any) {
   const route = new Hono();
 
   // ════════════════════════════
   //  列表 / 创建 / 切换 / 删除 / 主助手
   // ════════════════════════════
 
-  route.get("/agents", async (c) => {
+  route.get("/agents",   async (c) => {
+    const engine = getEngine(c);
     try {
       await engine.gcWorkspacePersistence?.();
       const fresh = c.req.query("fresh");
@@ -253,7 +254,8 @@ export function createAgentsRoute(engine) {
     }
   });
 
-  route.post("/agents", async (c) => {
+  route.post("/agents",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { name, id, yuan } = body;
@@ -269,7 +271,8 @@ export function createAgentsRoute(engine) {
     }
   });
 
-  route.post("/agents/switch", async (c) => {
+  route.post("/agents/switch",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { id } = body;
@@ -328,7 +331,8 @@ export function createAgentsRoute(engine) {
     }
   });
 
-  route.delete("/agents/:id", async (c) => {
+  route.delete("/agents/:id",   async (c) => {
+    const engine = getEngine(c);
     try {
       const id = c.req.param("id");
       if (!validateId(id)) return c.json({ error: "invalid id" }, 400);
@@ -353,7 +357,8 @@ export function createAgentsRoute(engine) {
     }
   });
 
-  route.put("/agents/primary", async (c) => {
+  route.put("/agents/primary",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { id } = body;
@@ -372,7 +377,8 @@ export function createAgentsRoute(engine) {
   //  排序
   // ════════════════════════════
 
-  route.put("/agents/order", async (c) => {
+  route.put("/agents/order",   async (c) => {
+    const engine = getEngine(c);
     try {
       const body = await safeJson(c);
       const { order } = body;
@@ -404,6 +410,7 @@ export function createAgentsRoute(engine) {
   // ════════════════════════════
 
   route.get("/agents/:id/avatar", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id)) {
       return c.json({ error: "invalid id" }, 400);
@@ -424,6 +431,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.post("/agents/:id/avatar", bodyLimit({ maxSize: 15 * 1024 * 1024 }), async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -451,6 +459,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.delete("/agents/:id/avatar", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -469,6 +478,7 @@ export function createAgentsRoute(engine) {
   // ════════════════════════════
 
   route.get("/agents/:id/config", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -549,6 +559,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.put("/agents/:id/config", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -707,6 +718,7 @@ export function createAgentsRoute(engine) {
   // ════════════════════════════
 
   route.get("/agents/:id/identity", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -720,6 +732,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.put("/agents/:id/identity", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -745,6 +758,7 @@ export function createAgentsRoute(engine) {
   // ════════════════════════════
 
   route.get("/agents/:id/ishiki", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -758,6 +772,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.put("/agents/:id/ishiki", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -782,6 +797,7 @@ export function createAgentsRoute(engine) {
   // ════════════════════════════
 
   route.get("/agents/:id/public-ishiki", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -796,6 +812,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.put("/agents/:id/public-ishiki", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -820,6 +837,7 @@ export function createAgentsRoute(engine) {
   // ════════════════════════════
 
   route.get("/agents/:id/pinned", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -833,6 +851,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.put("/agents/:id/pinned", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -857,6 +876,7 @@ export function createAgentsRoute(engine) {
   // ════════════════════════════
 
   route.get("/agents/:id/experience", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);
@@ -881,6 +901,7 @@ export function createAgentsRoute(engine) {
   });
 
   route.put("/agents/:id/experience", async (c) => {
+    const engine = getEngine(c);
     const id = c.req.param("id");
     if (!validateId(id) || !agentExists(engine, id)) {
       return c.json({ error: "agent not found" }, 404);

@@ -9,6 +9,7 @@ import {
 } from "../../core/web-session-store.ts";
 import { normalizeAccessProfile, scopesForAccessProfile } from "../../shared/access-scope-profiles.ts";
 import { registerUser } from "../auth/register.ts";
+import { softDeleteUser, hardDeleteUser, LastAdminError } from "../auth/unregister.ts";
 
 const DEFAULT_SESSION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -72,6 +73,34 @@ export function createWebAuthRoute({
       secure: secureCookies === true,
     }));
     return c.json({ ok: true, userId: registered.userId, scopes: registered.scopes });
+  });
+
+  // M1 账号注销（软删）：标记 disabled，保留业务数据与密码哈希，可恢复。
+  route.delete("/web-auth/account", async (c) => {
+    const principal = c.get("principal");
+    if (!principal?.userId) return c.json({ error: "unauthenticated" }, 401);
+    try {
+      await softDeleteUser(baseDir, principal.userId);
+    } catch (e: any) {
+      if (e?.message === "user_not_found") return c.json({ error: "user_not_found" }, 404);
+      return c.json({ error: e?.message || "delete_failed" }, 400);
+    }
+    // 引擎释放依赖 EngineLifecycle sweep（R6 修复：idle 即回收）。
+    return c.json({ ok: true });
+  });
+
+  // M1 账号硬删：删业务 home + 密码哈希 + 用户记录；末位系统管理员返回 409。
+  route.delete("/web-auth/account/hard", async (c) => {
+    const principal = c.get("principal");
+    if (!principal?.userId) return c.json({ error: "unauthenticated" }, 401);
+    try {
+      await hardDeleteUser(baseDir, principal.userId);
+    } catch (e: any) {
+      if (e instanceof LastAdminError) return c.json({ error: "last_admin" }, 409);
+      if (e?.message === "user_not_found") return c.json({ error: "user_not_found" }, 404);
+      return c.json({ error: e?.message || "delete_failed" }, 400);
+    }
+    return c.json({ ok: true });
   });
 
   route.post("/web-auth/login", async (c) => {
