@@ -1760,7 +1760,7 @@ export function createChatRoute(
       const requestContext = createRequestContext(c, engine);
       const isAdapterWithoutHttpRequest = !c?.req;
 
-      return {
+      const wsHandlers = {
         onOpen(event, ws) {
           activeWsClients++;
           clients.set(ws, createInitialWsClientRecord(requestContext, {
@@ -1772,7 +1772,17 @@ export function createChatRoute(
           // Task 3: 绑定每用户引擎到该 WS 连接（异步 acquire userId 对应 engine）。
           // onMessage 路径优先使用 ws.engine/ws.hub，实现多用户 session 根隔离。
           if (engineLifecycle) {
-            bindEngineToWs(ws, engineLifecycle, c);
+            // P0-1: 标记引擎未就绪，首消息将在 onMessage 顶部入队，待 acquire 完成后由 onReady 重放。
+            // 绝不回退全局 engine（H1 不变量）。
+            ws._engineState = "waiting";
+            bindEngineToWs(ws, engineLifecycle, c, {
+              onReady: (readyWs) => {
+                readyWs._engineState = "ready";
+                const pending = readyWs._pendingEvents;
+                readyWs._pendingEvents = undefined;
+                for (const ev of pending ?? []) wsHandlers.onMessage(ev, readyWs); // 重放（此时 engine 已就绪）
+              },
+            });
           }
         },
 
@@ -1780,6 +1790,12 @@ export function createChatRoute(
           // Hono @hono/node-ws delivers event.data as a string for text frames
           const msg = wsParse(event.data);
           if (!msg) return;
+          // P0-1: 首消息队列。per-user engine 异步 acquire 未就绪时入队，onReady 后由 flushPending 重放。
+          // 绝不回退全局 engine（H1 不变量）：engine 就绪前不处理任何消息。
+          if (engineLifecycle && ws._engineState === "waiting" && !ws.engine) {
+            (ws._pendingEvents ??= []).push(event);
+            return;
+          }
           let client = ensureWsClientRecord(ws, requestContext, {
             assumeLocalOwner: isAdapterWithoutHttpRequest,
           });
@@ -2265,6 +2281,8 @@ export function createChatRoute(
           }
         },
       };
+
+      return wsHandlers;
     })
   );
 

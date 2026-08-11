@@ -11,7 +11,12 @@ import { readAuthPrincipal } from "../http/capability-guard.ts";
  *
  * M0 作为机制接缝；全量 WS 路由接管推迟到 M1。
  */
-export function bindEngineToWs(ws: any, lifecycle: any, ctx: any): void {
+export function bindEngineToWs(
+  ws: any,
+  lifecycle: any,
+  ctx: any,
+  options: { onReady?: (ws: any) => void } = {},
+): void {
   const principal: any = readAuthPrincipal(ctx as any) ?? ws.principal;
   const userId = principal?.userId;
   if (!userId) {
@@ -26,6 +31,7 @@ export function bindEngineToWs(ws: any, lifecycle: any, ctx: any): void {
       ws.hub = handle.hub;
       ws.on("message", () => lifecycle.keepAlive(userId));
       ws.on("close", () => lifecycle.releaseRef(userId));
+      options.onReady?.(ws); // P0-1: acquire 完成 → 通知 chat.ts flush 待重放队列
     })
     .catch((e: any) => {
       ws.close(1011, e?.message || "engine_acquire_failed");
