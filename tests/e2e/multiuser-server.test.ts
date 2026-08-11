@@ -3,11 +3,22 @@ import os from "node:os";
 import fs from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
-import { EngineLifecycle } from "../../core/engine-lifecycle.ts";
+import { EngineLifecycle, resolveEngineRoots } from "../../core/engine-lifecycle.ts";
 import { userEngineMiddleware } from "../../server/composition/user-engine-middleware.ts";
 
 function tmpBase(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "m1-e2e-"));
+}
+
+/** 跳过真实 HanaEngine.init()，仅返回含 hanakoHome/systemRoot 的 fake engine。*/
+function makeFakeFactory(baseDir: string) {
+  return async (userId: string) => {
+    const { userDataRoot, systemRoot } = resolveEngineRoots(baseDir, userId);
+    return {
+      engine: { hanakoHome: userDataRoot, systemRoot, dispose: async () => {} },
+      hub: {},
+    };
+  };
 }
 
 const lcList: EngineLifecycle[] = [];
@@ -22,11 +33,12 @@ afterEach(async () => {
  * Task 9 E2E 验收（🟠较高）：多用户隔离端到端验证。
  * 起一个最小 Hono app，挂载 userEngineMiddleware + 一个返回当前用户 hanakoHome 的 /me 路由，
  * 用两个不同 userId 的请求断言各自解析到独立业务根（且 systemRoot 共享）。
+ * 使用 fake engineFactory 跳过真实 HanaEngine.init()（vitest v4 + node v25 已知限制）。
  */
 describe("multiuser server E2E (Task 9)", () => {
   it("different authenticated users get isolated hanakoHome, shared systemRoot", async () => {
     const baseDir = tmpBase();
-    const lc = new EngineLifecycle({ baseDir, productDir: baseDir });
+    const lc = new EngineLifecycle({ baseDir, productDir: baseDir, engineFactory: makeFakeFactory(baseDir) });
     lcList.push(lc);
 
     const app = new Hono();
@@ -57,7 +69,7 @@ describe("multiuser server E2E (Task 9)", () => {
 
   it("unauthenticated request is rejected (401)", async () => {
     const baseDir = tmpBase();
-    const lc = new EngineLifecycle({ baseDir, productDir: baseDir });
+    const lc = new EngineLifecycle({ baseDir, productDir: baseDir, engineFactory: makeFakeFactory(baseDir) });
     lcList.push(lc);
 
     const app = new Hono();

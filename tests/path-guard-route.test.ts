@@ -7,10 +7,21 @@ import {
   PathGuardError,
   userHomePath,
 } from "../core/multiuser/paths.ts";
-import { EngineLifecycle } from "../core/engine-lifecycle.ts";
+import { EngineLifecycle, resolveEngineRoots } from "../core/engine-lifecycle.ts";
 
 function tmpBase(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "m1-pathguard-"));
+}
+
+/** 跳过真实 HanaEngine.init()，仅返回含 hanakoHome/systemRoot 的 fake engine。*/
+function makeFakeFactory(baseDir: string) {
+  return async (userId: string) => {
+    const { userDataRoot, systemRoot } = resolveEngineRoots(baseDir, userId);
+    return {
+      engine: { hanakoHome: userDataRoot, systemRoot, dispose: async () => {} },
+      hub: {},
+    };
+  };
 }
 
 const lcList: EngineLifecycle[] = [];
@@ -46,10 +57,10 @@ describe("assertWithinUserRoot (Task 4 path-guard)", () => {
 describe("fs route path-guard (Task 4/7)", () => {
   it("per-user engine resolves session manifest only under own root", async () => {
     const baseDir = tmpBase();
-    const lc = new EngineLifecycle({ baseDir, productDir: baseDir });
+    const lc = new EngineLifecycle({ baseDir, productDir: baseDir, engineFactory: makeFakeFactory(baseDir) });
     lcList.push(lc);
     const h = await lc.use("u_a");
-    // hanakoHome 在 users/u_a 下，assertWithinUserRoot(baseDir, u_a) 应通过
+    // hanakoHome 在 users/u_a 下，assertWithinUserRoot 应通过
     expect(() => assertWithinUserRoot("u_a", h.engine.hanakoHome, baseDir)).not.toThrow();
   });
 });
@@ -57,7 +68,7 @@ describe("fs route path-guard (Task 4/7)", () => {
 describe("upload route path-guard (Task 4)", () => {
   it("per-user engine upload target stays within user root", async () => {
     const baseDir = tmpBase();
-    const lc = new EngineLifecycle({ baseDir, productDir: baseDir });
+    const lc = new EngineLifecycle({ baseDir, productDir: baseDir, engineFactory: makeFakeFactory(baseDir) });
     lcList.push(lc);
     const h = await lc.use("u_b");
     expect(() => assertWithinUserRoot("u_b", h.engine.hanakoHome, baseDir)).not.toThrow();
