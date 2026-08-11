@@ -100,6 +100,19 @@ export function deriveSandboxPolicy({
     ...workspaceRootsForSandbox(cwd, []),
   ]);
 
+  // P0-4 纵深防御：当 hanakoHome 指向 per-user 根（.../users/<userId>）时，
+  // 额外拒绝跨用户目录与 SystemDB 宿主，即使根因隔离（per-user hanakoHome 注入）已被绕过。
+  const extraDeny: string[] = [];
+  const normHome = hanakoHome ? path.resolve(hanakoHome) : "";
+  const userMatch = normHome.match(/[/\\]users[/\\]([^/\\]+)$/);
+  if (userMatch) {
+    const usersDir = path.dirname(normHome); // .../users
+    const baseDir = path.dirname(usersDir); // 顶层根
+    extraDeny.push(usersDir); // 拒绝所有其他用户目录（自身 home 在 hanakoHome 内，PathGuard 步骤 8 先命中）
+    extraDeny.push(path.join(usersDir, "_system")); // SystemDB 宿主
+    extraDeny.push(path.join(baseDir, "systemdb.sqlite")); // SystemDB 文件
+  }
+
   return {
     mode: "standard",
     access: SANDBOX_ACCESS_CONTRACT,
@@ -126,10 +139,11 @@ export function deriveSandboxPolicy({
       ...READ_ONLY_HOME_DIRS.map((d) => path.join(hanakoHome, d)),
     ].filter(Boolean),
 
-    // OS 沙盒用：拒绝读取（文件 + 目录）
+    // OS 沙盒用：拒绝读取（文件 + 目录）+ P0-4 per-user 纵深项
     denyReadPaths: [
       ...BLOCKED_FILES.map((f) => path.join(hanakoHome, f)),
       ...BLOCKED_DIRS.map((d) => path.join(hanakoHome, d)),
+      ...extraDeny,
     ],
 
     // OS 沙盒用：写保护（在可写范围内再限制）

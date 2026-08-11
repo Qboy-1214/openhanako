@@ -43,6 +43,7 @@ export class PathGuard {
   declare workspaceRoots: string[];
   declare policyWritablePaths: string[];
   declare allowExternalReads: boolean;
+  declare denyReadPaths: string[];
 
   /**
    * @param {object} policy  从 deriveSandboxPolicy() 得到，或兼容旧格式
@@ -60,6 +61,8 @@ export class PathGuard {
       : [policy.workspace].filter(Boolean);
     this.workspaceRoots = roots.map((root) => this._resolveReal(root) || path.resolve(root));
     this.policyWritablePaths = (policy.writablePaths || [])
+      .map((root) => this._resolveReal(root) || path.resolve(root));
+    this.denyReadPaths = (policy.denyReadPaths || [])
       .map((root) => this._resolveReal(root) || path.resolve(root));
     this.allowExternalReads = policy.allowExternalReads === true;
   }
@@ -165,6 +168,12 @@ export class PathGuard {
     // 8. hanakoHome 内未匹配 → 遵守 read-all 契约：非敏感路径可读，写仍需显式白名单。
     if (this._isInside(resolved, this.hanakoHome)) {
       return this.allowExternalReads ? AccessLevel.READ_ONLY : AccessLevel.BLOCKED;
+    }
+
+    // 8.5 P0-4 纵深防御：显式拒绝列表（per-user 语义下含跨用户目录与 SystemDB 宿主）。
+    // 自身 home 已在步骤 8（hanakoHome 内）先命中，不会落入此处。
+    for (const d of this.denyReadPaths) {
+      if (d && this._isInside(resolved, d)) return AccessLevel.BLOCKED;
     }
 
     // 9. workspace roots 内 → FULL
