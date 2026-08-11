@@ -11,6 +11,7 @@ import { detectPlatform, checkAvailability } from "./platform.ts";
 import { createSeatbeltExec } from "./seatbelt.ts";
 import { createBwrapExec } from "./bwrap.ts";
 import { createWin32Exec } from "./win32-exec.ts";
+import { createDockerExec, selectSandboxBackend } from "./docker.ts";
 import { wrapBashTool, wrapCommandExec } from "./tool-wrapper.ts";
 import { createEnhancedReadFile } from "./read-enhanced.ts";
 import { wrapReadImageWithVisionBridge } from "./read-image-vision.ts";
@@ -315,7 +316,23 @@ export function createSandboxedTools(cwd, customTools, {
   // ── macOS / Linux: PathGuard + OS 沙盒 ──
   let defaultSandboxedBashTool = normalBashTool;
   let escalatedSandboxedBashTool = normalBashTool;
-  if (osSandboxAvailable) {
+
+  // M2-3：docker 后端优先（HANAKO_SANDBOX_BACKEND=docker 或 Linux 裸机 docker 可用）。
+  // 与 seatbelt/bwrap 正交：容器内嵌套时选 bwrap 避免 docker-in-docker。
+  if (selectSandboxBackend() === "docker") {
+    const makeSandboxExec = (resolveNetworkEnabled) => (command, execCwd, execOpts) => createDockerExec(
+      makePolicy(),
+      { getExternalReadPaths, getSandboxNetworkEnabled: resolveNetworkEnabled },
+    )(command, execCwd, execOpts);
+    const defaultSandboxExec = makeSandboxExec(() => false);
+    const escalatedSandboxExec = makeSandboxExec(resolveSandboxNetworkEnabled);
+    defaultSandboxedBashTool = createBashTool(cwd, {
+      operations: { exec: defaultSandboxExec as any },
+    });
+    escalatedSandboxedBashTool = createBashTool(cwd, {
+      operations: { exec: escalatedSandboxExec as any },
+    });
+  } else if (osSandboxAvailable) {
     const makeSandboxExec = (resolveNetworkEnabled) => platform === "seatbelt"
       ? (command, execCwd, execOpts) => createSeatbeltExec(
           makePolicy(),
