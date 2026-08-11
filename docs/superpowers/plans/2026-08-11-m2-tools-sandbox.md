@@ -109,6 +109,7 @@ git commit -m "feat(m2/p0-2): add session->ownerUserId resolution index"
 **Files:**
 - Modify: `lib/sandbox/index.ts:82`（消费 `hanakoHome` 形参，已在 line 114/127/164/185 使用）
 - Modify: per-user engine 构造点（传入 `hanakoHome = userHome(userId)`）
+- Modify: `lib/sandbox/policy.ts`（纵深防御：禁止读其他用户目录 / SystemDB）
 - Test: `tests/path-guard-route.test.ts`（扩展）
 
 - [ ] **Step 1: Write the failing test for per-user hanakoHome isolation**
@@ -132,25 +133,34 @@ describe("per-user hanakoHome isolation", () => {
     const guard = new PathGuard(policy);
     expect(guard.getAccessLevel(path.join(baseDir, "users", "alice", "file.txt"))).not.toBe("blocked");
   });
+  it("alice cannot read SystemDB (defense-in-depth)", () => {
+    const policy = deriveSandboxPolicy({ agentDir: "", cwd: userHome("alice"), workspace: userHome("alice"), workspaceFolders: [], hanakoHome: userHome("alice"), mode: "standard" });
+    const guard = new PathGuard(policy);
+    expect(guard.getAccessLevel(path.join(baseDir, "systemdb.sqlite"))).toBe("blocked");
+    expect(guard.getAccessLevel(path.join(baseDir, "users", "_system"))).toBe("blocked");
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 Run: `npx vitest run tests/path-guard-route.test.ts`
-Expected: FAIL or existing tests pass but new per-user cases fail (policy default hanakoHome = baseDir allows cross-user)
+Expected: FAIL or existing tests pass but new per-user cases fail (policy default hanakoHome = baseDir allows cross-user; SystemDB rule absent)
 
 - [ ] **Step 3: Locate per-user engine creation and pass `userHome(userId)`**
 在 per-user engine 构造处（搜索 `createSandboxedTools(` 的调用点，传入 `hanakoHome: userHome(userId)`）。全局兜底 engine 保持 `hanakoHome: baseDir`（不改）。
 确认 `lib/sandbox/index.ts` 的 `makePolicy()`（line 106-116）已用形参 `hanakoHome` —— 无需改 index.ts 本身，只需调用方传对值（路径 E：零改动 PathGuard）。
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Add defense-in-depth rule to `policy.ts`**
+在 `deriveSandboxPolicy`（lib/sandbox/policy.ts）中新增纵深规则（REARCHITECTURE §8.8.6）：当 `hanakoHome` 指向 `users/<userId>/` 时，READ_ONLY/READ_WRITE 基准根自动限在该用户子目录内，并显式拒绝 `users/_system`（SystemDB 宿主）与跨用户 `users/<other>/` 访问。该规则为纵深防御，非根因（根因是 Step 3 的 per-user `hanakoHome`）。
+
+- [ ] **Step 5: Run test to verify it passes**
 Run: `npx vitest run tests/path-guard-route.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 ```bash
-git add tests/path-guard-route.test.ts <per-user-engine-file>
-git commit -m "feat(m2/p0-4): inject per-user hanakoHome into createSandboxedTools"
+git add tests/path-guard-route.test.ts <per-user-engine-file> lib/sandbox/policy.ts
+git commit -m "feat(m2/p0-4): inject per-user hanakoHome + deny cross-user/SystemDB in policy"
 ```
 
 ---
@@ -265,6 +275,14 @@ describe("P0-2 cross-user broadcast", () => {
     expect(wsA.received.some(m => m.type === "plugin_ui_changed")).toBe(true);
     expect(wsB.received.some(m => m.type === "plugin_ui_changed")).toBe(true);
   });
+  it("events with sessionPath but unresolved owner are dropped (fail-closed)", async () => {
+    const { server, wsA, wsB } = await setupTwoUsers();
+    // sessionPath 指向 Step 0 索引/前缀均无法反查 owner 的会话形态
+    emitSessionEventForUnresolvedOwner({ type: "text_delta", sessionPath: "bridge/unknown-session" });
+    await delay(10);
+    expect(wsA.received.some(m => m.type === "text_delta")).toBe(false);
+    expect(wsB.received.some(m => m.type === "text_delta")).toBe(false);
+  });
 });
 ```
 
@@ -278,7 +296,8 @@ Expected: FAIL — 当前 `broadcast` 全扇出
 function broadcast(msg, { ownerUserId }: { ownerUserId?: string | null } = {}) {
   const hardenedMsg = hardenStudio(msg);
   for (const [ws, record] of clients) {
-    // P0-2: 若指定 ownerUserId，仅发给该用户 ws（系统级事件 ownerUserId 为 undefined → 全广播）
+    // P0-2: ownerUserId === undefined → 全局事件（系统级，无 owner 维度）→ 不过滤，全扇出
+    //       ownerUserId 为 string → 仅发给该用户 ws
     if (ownerUserId && record?.principal?.userId !== ownerUserId) continue;
     if (!wsClientCanReceiveEvent(record, hardenedMsg)) continue;
     wsSend(ws, hardenedMsg);
@@ -289,11 +308,16 @@ function broadcast(msg, { ownerUserId }: { ownerUserId?: string | null } = {}) {
 ```ts
 hub.subscribe((event, sessionPath) => {
   const appEventMessage = toAppEventWsMessage(event);
-  if (appEventMessage) { broadcast(appEventMessage); return; } // 全局事件（无 owner）
+  if (appEventMessage) { broadcast(appEventMessage); return; } // 全局事件（无 owner）→ 全广播
   const resourceEventMessage = toResourceEventWsMessage(event, sessionPath);
   if (resourceEventMessage) { broadcast(resourceEventMessage); return; } // 全局
   if (event.type === "plugin_ui_changed") { broadcast({ type: "plugin_ui_changed" }); return; } // 全局
   const ownerUserId = resolveOwnerUserId(sessionPath); // P0-2 Step 0
+  // P0-2 fail-closed：带 sessionPath 但解析无 owner（Step 0 未覆盖的会话形态）→ 丢弃 + warn，不广播
+  if (sessionPath && ownerUserId === null) {
+    logger.warn({ sessionPath }, "P0-2 drop event: owner unresolved, fail-closed");
+    return;
+  }
   const compactionMessage = toCompactionLifecycleWsMessage(
     (sp) => engine.getSessionByPath(sp),
     (sp) => sessionIdForPath(sp),
@@ -345,6 +369,7 @@ Expected: FAIL — 当前 desk 用全局 engine
 export function createDeskRoute(getEngine: (c: Context) => Promise<HanaEngine>, hub: Hub) {
   return (c: Context) => {
     const engine = getEngine(c); // F1：从 principal.userId 解析 per-user engine
+    if (!engine) return c.json({ error: "unauthorized" }, 401); // 解析失败 fail-closed（spec §3 P0-3：401/403）
     // ... 原有 46+ 处 engine.xxx 现在用局部 engine
     return handleDesk(c, engine, hub);
   };
@@ -618,6 +643,13 @@ describe("M2-2 nocode workflow", () => {
     const result = await runWorkflowScript(js);
     expect(result).toBeTruthy();
   });
+  it("streams partial results through lib/workflow kernel unchanged", async () => {
+    const graph = { nodes: [{ id: "n1", tool: "echo", prompt: "hello" }], edges: [] };
+    const js = compileWorkflow(graph);
+    const events: string[] = [];
+    await runWorkflowScript(js, { onEvent: (e) => events.push(e.type) });
+    expect(events.length).toBeGreaterThan(0); // 内核流式事件透传，lib/workflow 零改动
+  });
 });
 ```
 
@@ -698,4 +730,16 @@ git commit -m "test(m2): full integration green — P0 closure + M2 tools/sandbo
 
 **3. Type consistency:** `resolveOwnerUserId` (Task 0) → 用于 Task 3；`createDockerExec` 签名 (Task 5) 与 `createBwrapExec` 同构；`registerUserScript`/`compileWorkflow` 命名跨 Task 一致。
 
-**Gaps:** 无。所有 spec 段均有对应 Task。
+**4. Spec deviations closed in this revision:**
+- P0-2 解析失败（带 sessionPath 但 owner 未知）→ fail-closed 丢弃 + warn（Task 3 Step 3 + 新测试），非全广播；ownerUserId===undefined 才全广播（全局事件）。
+- P0-4 补 `policy.ts` 纵深规则（禁止读其他用户目录 / SystemDB，REARCHITECTURE §8.8.6）+ SystemDB 测试（Task 1 Step 4）。
+- P0-3 F1 解析失败返回 401（Task 4 Step 3）。
+- M2-2 测试补流式事件透传断言（Task 8 Step 1）。
+- M2-1「监听 tools 目录变更」为可选增强，本 plan 仅实现 POST handler 触发热注册（spec 允许二选一）。
+
+**5. Explicitly out of scope (spec §6.1 跨里程碑待办，归 M5，本 plan 不实现):**
+- `.env.example` 创建（含 `HANAKO_SANDBOX_BACKEND` 默认值与安全含义）
+- M5 `docker-compose.yml` 注入 `HANAKO_SANDBOX_BACKEND=bwrap`
+以上两项在 spec 中明确声明为 M5 范围，本 plan 仅依赖其约束（`selectSandboxBackend` 读取该 env），不假装已实现。
+
+**Gaps:** 无（除显式标注的 M5 待办）。所有 spec 段均有对应 Task 或可解释排除项。
