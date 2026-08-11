@@ -41,6 +41,7 @@ M2 = **M1 收尾（P0）× 工具与沙箱（M2-1/2/3）**，共用主轴：**"�
   - owner 应从 `sessionPath` 解析：`currentLocator.path` 形如 `users/<userId>/sessions/<id>`，userId 即路径段；复用 `getState(sessionPath)`（chat.ts:1122 已有）或 `sessionIdForPath` 反查。
 - **[🔴 Step 0 必做]** 落实 owner 映射前，plan 须先确认 manifest 是否可靠携带 userId：若 `users/<userId>/` 前缀在 bridge/agent 会话等形态缺失，需**补写 userId 到 session-manifest**（或建 `sessionPath → userId` 独立索引供 hub 回调 O(1) 查），否则方案 B 的过滤前提不成立。该 Step 0 置于 P0-2 实现最前。
 - 解析失败（无 owner）→ 按错误表丢弃 + warn（fail-closed，不误伤正常会话）。
+- **[🟡 全局/系统事件处理]** 部分事件**没有 sessionPath**（如 `plugin_ui_changed`、`bridge_message`，见 `toNotificationWsMessage` chat.ts:294 `sessionPath` 缺省归一 null、`hardenStudio` line 549 `if(!msg.sessionPath) return msg`）。`broadcast(msg, { ownerUserId })` 在 **`ownerUserId` 为 undefined/null 时必须保持全局广播（不过滤、发给所有 ws）**——系统级事件本就无 owner 维度，错误过滤会丢弃合法系统事件。**实现者在 plan/注释里须显式标注此分支，防止把系统级事件误当作跨用户事件过滤掉。**
 
 **P0-3 desk F1**（`server/routes/desk.ts` + `server/composition/full-root.ts`）
 - `createDeskRoute(getEngine, hub)`：`const engine = getEngine(c)` 在每个 handler 顶部解析（沿用 M1 的 F1 模式）。
@@ -56,7 +57,9 @@ M2 = **M1 收尾（P0）× 工具与沙箱（M2-1/2/3）**，共用主轴：**"�
 
 **M2-1 用户脚本工具**（`server/`、`lib/sandbox/`）**[GRILL 路径 G + 实证修正]**
 - 存储：落盘 `users/<userId>/tools/<id>/{manifest.json, src}`，manifest = {name, paramSchema, runtime∈{js,ts,py,sh}}。**不设 `user_assets` 全局表**（该表在 codebase 不存在，属虚构）。
-- 注册（实证）：`ToolCatalog.registerSource`（tool-catalog.ts:178）**真实存在且幂等**（`_sources.set(id,normalized)` + `_invalidate()`，重复调用覆盖；`replaceSource` 同义，line 187）。`ToolCatalogOrigin` 仅 `"mcp"|"builtin"`（line 23，无 "user"）——user 脚本 entries 的 `origin` 暂复用 `"builtin"`（或 plan 阶段扩展枚举，spec 不强制）。
+- 注册（实证）：`ToolCatalog.registerSource`（tool-catalog.ts:178）**真实存在且幂等**（`_sources.set(id,normalized)` + `_invalidate()`，重复调用覆盖；`replaceSource` 同义，line 187）。
+- **[🟡 B origin 枚举确认步骤]** `ToolCatalogOrigin` 仅 `"mcp"|"builtin"`（line 23），且 **`tool-catalog.ts:162` 强制归一：`input.origin === "builtin" ? "builtin" : "mcp"`**——任何非 builtin 值（含设想的 `"user"`）会被**静默降级为 `"mcp"`**，走 `tool-catalog-bridge.ts:257/300` 的 MCP 调用分支（无对应 server → 调用失败/权限错配）。此外 `builtin` 路径经 `builtinCall` dispatch（line 302），与内置工具共享权限 voice。
+  - **Plan Step 1 必做确认**：先查 `if (entry.origin === "builtin")` 的全部权限/可见性分支（engine.ts:2905 的 `deferredToolNames` 命名、tool-catalog-bridge.ts:257/300 的 invocation 路由、plugin-manager 的 `source==="builtin"` 信任链）——判定用户脚本复用 `"builtin"` 是否会错误继承内置工具权限级别。结论二选一：(a) 扩展 `ToolCatalogOrigin` 加 `"user"` 并补对应分支（推荐，语义正确、不污染 builtin 信任链）；(b) 复用 `"builtin"` 但需显式确认 `builtinCall` 能正确 dispatch 用户脚本 handler 且权限边界可接受。**无论选哪条，Plan 须先完成此确认再写注册代码，禁止直接写 `"user"` 后依赖 line 162 的静默降级。**
 - **[🔴 注册时机修正]** 不能只在"engine 启动时注册"——否则新工具需重启 engine。**正确时机：engine acquire 完成后热注册**，并由 `POST /api/tools` handler 在落盘新工具后调 `catalog.replaceSource("user-scripts-<userId>", entries)` 增量刷新（registerSource 幂等，安全覆盖）；也可监听 `users/<userId>/tools/` 目录变更。运行时 handler 调 `createSandboxedTools` 的 exec 后端执行。**不走 plugin-runtime 的"安装式插件"打包流程**。
 
 **M2-2 无代码工作流**（前端层 + 复用 `lib/workflow/`）**[GRILL 路径 J + 归属明确]**
