@@ -582,10 +582,9 @@ import * as path from "path";
 export interface UserScriptDef { name: string; paramSchema: any; runtime: "js"|"ts"|"py"|"sh"; src: string; }
 
 export async function persistUserScript(userId: string, id: string, def: UserScriptDef, hanakoHome: string) {
-  // engine.hanakoHome 是顶层根目录（实测 server/index.ts:440 baseDir = dirname(hanakoHome)），
-  // 非 users/<userId> 子目录。故 path.join(hanakoHome, "users", userId, ...) 是单层正确路径，
-  // 结果形如 <root>/users/<userId>/tools/<id>；不要误删 "users" 段（那会落盘到错误位置）。
-  const dir = path.join(hanakoHome, "users", userId, "tools", id);
+  // 双根模型（open-root.ts:21）：per-user engine 的 hanakoHome = <baseDir>/users/<userId>（已含 users 段）。
+  // 故落盘直接 path.join(hanakoHome, "tools", id)，不要再拼 "users"/userId（否则双重路径）。
+  const dir = path.join(hanakoHome, "tools", id);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, "manifest.json"), JSON.stringify(def, null, 2));
   await fs.writeFile(path.join(dir, "src"), def.src);
@@ -695,14 +694,17 @@ app.post("/api/workflows", async (c) => {
   const graph = await c.req.json();
   const js = compileWorkflow(graph); // 编译器归属服务端
   const id = crypto.randomUUID();
-  const engine = getEngine(c); // F1：解析 per-user engine
-  await fs.writeFile(path.join(engine.hanakoHome, "users", userId, "workflows", id, "script.js"), js);
+  const engine = getEngine(c); // F1：解析 per-user engine（其 hanakoHome 已含 users/<userId> 段）
+  // 双根模型：per-user engine.hanakoHome = <baseDir>/users/<userId>，落盘直接用该根，不再拼 users/userId
+  const dir = path.join(engine.hanakoHome, "workflows", id);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, "script.js"), js);
   return c.json({ id, status: "compiled" });
 });
 ```
 
 - [ ] **Step 5: Modify `workflow-tool.ts` `execute()` to consume script.js**
-将现有读取 JS 字符串的地方改为从 `path.join(engine.hanakoHome, "users", userId, "workflows", id, "script.js")` 绝对路径读取，调 `runWorkflowScript(script, hostApi)`。
+将现有读取 JS 字符串的地方改为从 `path.join(engine.hanakoHome, "workflows", id, "script.js")` 绝对路径读取（per-user engine.hanakoHome 已含 users/<userId> 段，不再拼 users/userId），调 `runWorkflowScript(script, hostApi)`。
 
 - [ ] **Step 6: Run test to verify it passes**
 Run: `npx vitest run tests/workflow/nocode.test.ts`
@@ -765,7 +767,7 @@ git commit -m "test(m2): full integration green — P0 closure + M2 tools/sandbo
 - 🔴 错误 A（Task 0 import）：line 46 原只导入 `resolveOwnerUserId`，case 3 调了 `registerSessionOwner` 未导入 → 测试 FAIL。已补 `import { resolveOwnerUserId, registerSessionOwner } from "../../core/session-manifest/owner"`。
 - 🔴 错误 C（Task 8 Step 4）：`POST /api/workflows` handler 内引用 `engine.hanakoHome` 但缺 `const engine = getEngine(c)` → 运行时崩溃。已在 `fs.writeFile` 前补 `const engine = getEngine(c)`。
 - 🔴 错误 B（重复调用）：Task 7 Step 4 残留旧签名 `persistUserScript(userId, id, def)`（无 hanakoHome），与新调用重复落盘。已删除残留行，仅保留 `persistUserScript(userId, id, def, engine.hanakoHome)`。
-- 🔴 错误 B（路径「双重」前提纠正）：用户判定 `path.join(hanakoHome,"users",userId,...)` 会双重（`baseDir/users/<userId>/users/<userId>/...`）。**实测不成立**：`engine.hanakoHome` 是顶层根目录（server/index.ts:440 `baseDir = dirname(hanakoHome)` 反证 hanakoHome 即根，如 `/data/hanako`），故该拼接为单层正确路径（`<root>/users/<userId>/tools/<id>`）。用户混淆了 P0-4 传给 `deriveSandboxPolicy` 的 sandbox 视角 `hanakoHome`（=`baseDir/users/<userId>`）与 `engine.hanakoHome` 字段（根目录）两套语义。已在 persistUserScript 与 Step 4 注释中明确此区分，路径写法维持不变。
+- 🔴 错误 B（路径双重，前期误判为误报，本轮纠正）：`getEngine(c)` 返回的是 **per-user engine**，其 `hanakoHome` 按双根模型（`open-root.ts:21`）= `<baseDir>/users/<userId>`，**已含 users 段**。原 `path.join(engine.hanakoHome, "users", userId, ...)` 会形成双重路径。已修正：Task 7 `persistUserScript` 改 `path.join(hanakoHome, "tools", id)`；Task 8 Step 4 改 `path.join(engine.hanakoHome, "workflows", id)` 并补 `fs.mkdir`；Task 8 Step 5 同去掉多余 users/userId 段。前期用全局兜底引擎（`server/index.ts:441` hanakoHome=根）反驳是混淆了两套语义——路由里 `getEngine(c)` 拿到的是 per-user 引擎，非全局兜底。
 
 **5. Explicitly out of scope (spec §6.1 跨里程碑待办，归 M5，本 plan 不实现):**
 - `.env.example` 创建（含 `HANAKO_SANDBOX_BACKEND` 默认值与安全含义）
