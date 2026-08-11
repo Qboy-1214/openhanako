@@ -54,7 +54,8 @@ describe("session -> ownerUserId mapping", () => {
     expect(resolveOwnerUserId(undefined)).toBeNull();
   });
   it("resolves owner for bridge/agent sessions via manifest index", () => {
-    // 假设 manifest 索引已建立：bridge-session 也能反查 owner
+    // bridge/b1 无 users/ 前缀，前缀解析返回 null；须先经 Step 0 运行时补写索引
+    registerSessionOwner("bridge/b1", "u_alice");
     expect(resolveOwnerUserId("bridge/b1")).toBe("u_alice");
   });
 });
@@ -214,29 +215,38 @@ onMessage(event, ws) {
   });
   // ... 原有逻辑继续
 ```
-在 `bindEngineToWs` 的 `.then` 回调（engine-ws-binding.ts）就绪后：
+在 `bindEngineToWs` 的 `.then` 回调（engine-ws-binding.ts）就绪后，通过 `onReady` 回调完成 flush——**注意 `handleWsMessage` 是 chat.ts `onOpen`/`onMessage` 闭包内的局部函数，外部模块（engine-ws-binding.ts）不可直接引用**，故 flush 逻辑必须留在 chat.ts 内，由 `onReady` 回调传出：
 ```ts
-lifecycle.use(userId).then(({ engine, hub }) => {
-  ws.engine = engine;
-  ws.hub = hub;
-  const pending = (ws as any)._pending as unknown[] | undefined;
-  if (pending?.length) {
+// chat.ts onOpen（line 1764），bindEngineToWs 调用处注入 onReady：
+bindEngineToWs(ws, engineLifecycle, c, {
+  onReady: (ws) => {
+    const pending = (ws as any)._pending as unknown[] | undefined;
     (ws as any)._pending = [];
-    for (const m of pending) {
-      // 重新进入 onMessage 处理逻辑（抽取为 handleWsMessage(ws, m)）
-      handleWsMessage(ws, m);
-    }
-  }
-}).catch(() => {
-  // acquire 失败：超时由下方 timer 处理
+    for (const m of pending ?? []) handleWsMessage(ws, m); // 重放（此时 engine 已就绪）
+  },
 });
-// 超时关闭：绝不回退全局 engine
-const timer = setTimeout(() => {
-  if (!ws.engine) ws.close(1011);
-}, 5000);
-ws.addEventListener?.("close", () => clearTimeout(timer));
+
+// engine-ws-binding.ts：bindEngineToWs 增加 onReady 形参，.then 末尾调用
+export function bindEngineToWs(
+  ws: WebSocket,
+  lifecycle: EngineLifecycle,
+  ctx: WsBindingContext,
+  opts: { onReady?: (ws: WebSocket) => void } = {},
+) {
+  const timer = setTimeout(() => {
+    if (!ws.engine) ws.close(1011); // 超时关闭：绝不回退全局 engine（H1）
+  }, 5000);
+  ws.addEventListener?.("close", () => clearTimeout(timer));
+  return lifecycle.use(userId).then(({ engine, hub }) => {
+    ws.engine = engine;
+    ws.hub = hub;
+    opts.onReady?.(ws); // acquire 完成 → 通知 chat.ts flush 待重放队列
+  }).catch(() => {
+    // acquire 失败：超时由上方 timer 处理，不回退全局
+  });
+}
 ```
-（重构：将 `onMessage` 现有 body 抽为 `handleWsMessage(ws, msg)`，供 flush 复用。）
+（重构：将 `onMessage` 现有 body 抽为 `handleWsMessage(ws, msg)`，供 flush 复用；`handleWsMessage` 与 `onOpen`/`onMessage` 同处 chat.ts 闭包，可互相访问。）
 
 - [ ] **Step 4: Run test to verify it passes**
 Run: `npx vitest run tests/e2e/multiuser-server.test.ts -t "P0-1"`
@@ -571,8 +581,9 @@ import * as path from "path";
 
 export interface UserScriptDef { name: string; paramSchema: any; runtime: "js"|"ts"|"py"|"sh"; src: string; }
 
-export async function persistUserScript(userId: string, id: string, def: UserScriptDef) {
-  const dir = path.join("users", userId, "tools", id);
+export async function persistUserScript(userId: string, id: string, def: UserScriptDef, hanakoHome: string) {
+  // 基于 engine.hanakoHome 构造绝对路径（M2 架构约定的 per-user 根），不依赖不可控的 CWD
+  const dir = path.join(hanakoHome, "users", userId, "tools", id);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, "manifest.json"), JSON.stringify(def, null, 2));
   await fs.writeFile(path.join(dir, "src"), def.src);
@@ -604,6 +615,7 @@ app.post("/api/tools", async (c) => {
   const id = crypto.randomUUID();
   await persistUserScript(userId, id, def);
   const engine = getEngine(c);
+  await persistUserScript(userId, id, def, engine.hanakoHome); // 绝对路径落盘到 per-user 根
   await registerUserScript(engine.toolCatalog, userId, def); // 热注册，无需重启
   return c.json({ id, status: "registered" });
 });
@@ -640,15 +652,21 @@ describe("M2-2 nocode workflow", () => {
     const graph = { nodes: [{ id: "n1", tool: "summarize", prompt: "x" }], edges: [] };
     const js = compileWorkflow(graph);
     expect(js).toContain("agent(");
-    const result = await runWorkflowScript(js);
+    // runWorkflowScript(script, hostApi, opts) — 第 2 参为注入沙箱全局的 hostApi 对象，opts 仅 {signal,deadlineMs}
+    const hostApi = { agent: async (fn: any) => ({ result: "ok" }) };
+    const result = await runWorkflowScript(js, hostApi);
     expect(result).toBeTruthy();
   });
   it("streams partial results through lib/workflow kernel unchanged", async () => {
     const graph = { nodes: [{ id: "n1", tool: "echo", prompt: "hello" }], edges: [] };
     const js = compileWorkflow(graph);
-    const events: string[] = [];
-    await runWorkflowScript(js, { onEvent: (e) => events.push(e.type) });
-    expect(events.length).toBeGreaterThan(0); // 内核流式事件透传，lib/workflow 零改动
+    // 流式结果通过 hostApi 注入的全局函数透传，非 opts.onEvent
+    const streamed: string[] = [];
+    const hostApi = {
+      agent: async (fn: any) => { streamed.push("agent:start"); const r = await fn(); streamed.push("agent:end"); return r; },
+    };
+    await runWorkflowScript(js, hostApi);
+    expect(streamed.length).toBeGreaterThan(0); // 内核流式事件透传，lib/workflow 零改动
   });
 });
 ```
@@ -674,13 +692,13 @@ app.post("/api/workflows", async (c) => {
   const graph = await c.req.json();
   const js = compileWorkflow(graph); // 编译器归属服务端
   const id = crypto.randomUUID();
-  await fs.writeFile(path.join("users", userId, "workflows", id, "script.js"), js);
+  await fs.writeFile(path.join(engine.hanakoHome, "users", userId, "workflows", id, "script.js"), js);
   return c.json({ id, status: "compiled" });
 });
 ```
 
 - [ ] **Step 5: Modify `workflow-tool.ts` `execute()` to consume script.js**
-将现有读取 JS 字符串的地方改为从 `users/<userId>/workflows/<id>/script.js` 读取，调 `runWorkflowScript(script)`。
+将现有读取 JS 字符串的地方改为从 `path.join(engine.hanakoHome, "users", userId, "workflows", id, "script.js")` 绝对路径读取，调 `runWorkflowScript(script, hostApi)`。
 
 - [ ] **Step 6: Run test to verify it passes**
 Run: `npx vitest run tests/workflow/nocode.test.ts`
@@ -728,7 +746,14 @@ git commit -m "test(m2): full integration green — P0 closure + M2 tools/sandbo
 
 **2. Placeholder scan:** 无 TBD/TODO；每个 code step 含完整片段；测试含实际断言。
 
-**3. Type consistency:** `resolveOwnerUserId` (Task 0) → 用于 Task 3；`createDockerExec` 签名 (Task 5) 与 `createBwrapExec` 同构；`registerUserScript`/`compileWorkflow` 命名跨 Task 一致。
+**3. Type consistency:** `resolveOwnerUserId` (Task 0) → 用于 Task 3；`createDockerExec` 签名 (Task 5) 与 `createBwrapExec` 同构；`registerUserScript`/`compileWorkflow` 命名跨 Task 一致；落盘均统一 `path.join(engine.hanakoHome, "users", ...)` 绝对路径。
+
+**4. Spec deviations / real-bug fixes closed in this revision (peer review round 2):**
+- 🔴 Task 0 测试 case 3：`resolveOwnerUserId("bridge/b1")` 依赖 Step 0 索引，补 `registerSessionOwner("bridge/b1","u_alice")` 前置，否则两种解析路径均返回 null → 测试 FAIL。
+- 🔴 Task 2：`bindEngineToWs` 增加 `onReady` 形参，flush 逻辑留在 chat.ts `onOpen` 闭包内执行（handleWsMessage 是 chat.ts 局部函数，外部模块不可引用）。
+- 🔴 Task 7/8 落盘：`path.join("users",...)` 相对路径依赖 CWD → 改为 `path.join(engine.hanakoHome, "users", ...)` 绝对路径（M2 per-user 根约定）。
+- 🟡 Task 8 测试：`runWorkflowScript(script, hostApi, opts)` 第 2 参为 hostApi 对象（注入沙箱全局），流式经 hostApi 注入验证，非 `opts.onEvent`（已核实 lib/workflow 无 onEvent）。
+- 🟡 Task 3 broadcast：`record` 即 `clients` map 的 value（createWsClientRecord 产出），实现时统一用 `record` 访问 `record.principal.userId`，仅命名一致性提醒，无运行时风险。
 
 **4. Spec deviations closed in this revision:**
 - P0-2 解析失败（带 sessionPath 但 owner 未知）→ fail-closed 丢弃 + warn（Task 3 Step 3 + 新测试），非全广播；ownerUserId===undefined 才全广播（全局事件）。
