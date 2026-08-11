@@ -34,6 +34,9 @@ export interface BridgeToolDeps {
   resolveBuiltinInvocation?: (name: string, params: unknown) => unknown;
   /** Executes a deferred builtin tool in place of the MCP call path. */
   builtinCall?: (name: string, args: Record<string, unknown>, ctx: unknown) => Promise<unknown>;
+  /** M2-1: executes a user-script tool (origin="user"). Resolves from the entry's
+   *  serverId (`user:<userId>`) and the per-user hanakoHome; supplied by the engine. */
+  userScriptExecutor?: (entry: ToolCatalogEntry, args: Record<string, unknown>, ctx: unknown) => Promise<unknown>;
   log?: { warn?: (message: string) => void; log?: (message: string) => void };
 }
 
@@ -300,6 +303,10 @@ export function createBridgeTools({
         if (entry.origin === "builtin") {
           if (!builtinCall) return text(`${entry.name} 当前不可调用。`);
           return await builtinCall(entry.name, args, ctx) as any;
+        }
+        if (entry.origin === "user") {
+          if (!userScriptExecutor) return text(`${entry.name} 当前不可调用（用户脚本执行器未配置）。`);
+          return await userScriptExecutor(entry, args, ctx) as any;
         }
         return await mcpCall(entry.serverId, entry.toolName, args, ctx) as any;
       } catch (error: any) {

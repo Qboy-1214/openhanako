@@ -145,6 +145,7 @@ import { createToolCatalog } from "./tool-catalog.ts";
 import { hashCacheContractValue } from "../lib/llm/cache-prefix-contract.ts";
 import { resolveReferenceBudgetTokens } from "./session-reminders.ts";
 import { createBridgeTools, registerBridgeCapabilityDelegates } from "./tool-catalog-bridge.ts";
+import { readUserScript, executeUserScript } from "./user-script-runtime.ts";
 import { summarizeToolParameters } from "./mcp/manager.ts";
 
 /** Matches the MCP config default; used when no manager config is available. */
@@ -331,6 +332,8 @@ export class HanaEngine {
   declare channelsDir: any;
   declare hanakoHome: any;
   declare systemRoot: any;
+  declare userId: string | null;
+  declare _userScripts: UserScriptDef[];
   declare _inputDrafts: any;
   declare productDir: any;
   declare userDir: any;
@@ -352,6 +355,10 @@ export class HanaEngine {
     this.systemRoot = systemRoot || hanakoHome; // GRILL Q11-A 双根；单根退化
     this.productDir = productDir;
     this.appVersion = appVersion || "0.0.0";
+    // M2-1：per-user 引擎从 hanakoHome（= users/<userId>）解析 owner
+    const userMatch = String(hanakoHome).match(/[/\\]users[/\\]([^/\\]+)$/);
+    this.userId = userMatch ? userMatch[1] : null;
+    this._userScripts = [];
     this._runtimeContext = null;
     this._resources = null;
     this._resourceAccess = null;
@@ -2876,6 +2883,17 @@ export class HanaEngine {
     // they exist and read their schema, they simply also stay loaded.
     if (liveMcpEntries.length > 0) catalog.registerSource("mcp", liveMcpEntries);
     if (builtinEntries.length > 0) catalog.registerSource("builtin", builtinEntries);
+    // M2-1：合并已注册的用户脚本（per-user 引擎天然归属该 userId）
+    if (this._userScripts.length > 0) {
+      catalog.registerSource(`user:${this.userId ?? "anon"}`, this._userScripts.map((def) => ({
+        name: def.name,
+        serverId: `user:${this.userId ?? "anon"}`,
+        origin: "user",
+        description: def.description,
+        paramsSummary: def.paramsSummary,
+        schemaRef: () => def.schema ?? { type: "object", properties: {} },
+      })));
+    }
 
     const builtinToolsByName = new Map<string, any>(
       (pluginTools || []).map((tool) => [tool?.name, tool] as [string, any]),
@@ -2898,6 +2916,15 @@ export class HanaEngine {
           throw new Error(`Deferred tool ${name} is no longer available`);
         }
         return target.execute(`bridge_${name}`, args, ctx, undefined, ctx);
+      },
+      // M2-1：用户脚本工具执行器。core 层仅原生支持 js/ts（vm 沙箱）；
+      // py/sh 需要 server 层注入的沙盒 exec（execBackend），未注入时提示。
+      userScriptExecutor: async (entry, args, ctx) => {
+        const userId = String(entry.serverId || "").replace(/^user:/, "");
+        const def = readUserScript(userId, entry.name, this.hanakoHome);
+        if (!def) return { content: [{ type: "text", text: `${entry.name} 的用户脚本未找到。` }] };
+        const result = await executeUserScript(def, args, {});
+        return { content: [{ type: "text", text: String(result) }] };
       },
       log: toolAvailabilityLog,
     });
@@ -2929,6 +2956,19 @@ export class HanaEngine {
    * against the listing it was given. Returns null when there is no MCP manager
    * to ask, which reads as "no basis to claim anything changed".
    */
+  /**
+   * M2-1：注册用户脚本工具（幂等热注册）。落盘到 per-user 根的
+   * users/<userId>/tools/<name>，并加入该引擎的 _userScripts，使其在每次
+   * deferral catalog 重建时持续出现在模型可调用列表。
+   */
+  registerUserScript(def: UserScriptDef): void {
+    if (!this.userId) return; // 全局/未知引擎不注册用户脚本
+    persistUserScript(this.userId, def.name, def, this.hanakoHome);
+    const existing = this._userScripts.findIndex((s) => s.name === def.name);
+    if (existing >= 0) this._userScripts[existing] = def;
+    else this._userScripts.push(def);
+  }
+
   getLiveToolCatalogNames() {
     if (!this._mcp) return null;
     return this._liveMcpCatalogEntries()
