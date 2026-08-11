@@ -29,7 +29,7 @@ export function registerClosedRoutes(app: Hono, ctx: CompositionContext): void {
   app.route("/api", createAvatarRoute(engine));
   app.route("/api", createCharacterCardsRoute(getUserEngine));
   app.route("/api", createCardsRoute(engine));
-  app.route("/api", createDeskRoute(engine, hub));
+  app.route("/api", createDeskRoute(getUserEngine, hub));
   app.route("/api", createDiaryRoute(engine));
 }
 

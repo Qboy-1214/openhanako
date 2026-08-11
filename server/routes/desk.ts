@@ -11,6 +11,7 @@ import os from "os";
 import path from "path";
 import crypto from "crypto";
 import { execFileSync } from "child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.ts";
 import { parseSkillMetadata } from "../../lib/skills/skill-metadata.ts";
@@ -311,8 +312,36 @@ const WORKSPACE_SEARCH_LIMIT = 80;
 const BEAUTIFY_OPTIONAL_TOOL_NAME = "beautify";
 const MAX_COVER_UPLOAD_BYTES = 25 * 1024 * 1024;
 
-export function createDeskRoute(engine, hub) {
+export function createDeskRoute(getEngine, hub) {
   const route = new Hono();
+  // P0-3 F1: 按请求解析 per-user engine（userEngineMiddleware 把引擎挂到 c.get("engine")）。
+  // 用 AsyncLocalStorage 保存当前请求的 c，engine 以惰性 Proxy 形式暴露：
+  // 每次访问 engine.xxx 都在当前请求上下文解析到对应 per-user 引擎，从而多用户不串。
+  const engineCtx = new AsyncLocalStorage<any>();
+  route.use("*", async (c, next) => {
+    const e = getEngine(c);
+    if (!e) return c.json({ error: "unauthorized" }, 401); // F1 解析失败 fail-closed
+    await engineCtx.run(c, () => next());
+  });
+  const engine = new Proxy({}, {
+    get(_t, prop) {
+      const c = engineCtx.getStore();
+      const e = c ? getEngine(c) : undefined;
+      if (!e) return undefined;
+      const v = (e as any)[prop];
+      return typeof v === "function" ? v.bind(e) : v;
+    },
+    has(_t, prop) {
+      const c = engineCtx.getStore();
+      const e = c ? getEngine(c) : undefined;
+      return !!e && prop in e;
+    },
+    ownKeys() {
+      const c = engineCtx.getStore();
+      const e = c ? getEngine(c) : undefined;
+      return e ? Object.keys(e) : [];
+    },
+  });
 
   function bindCronRequestScope(c) {
     const requestContext = createRequestContext(c, engine);
