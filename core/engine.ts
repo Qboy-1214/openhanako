@@ -145,7 +145,7 @@ import { createToolCatalog } from "./tool-catalog.ts";
 import { hashCacheContractValue } from "../lib/llm/cache-prefix-contract.ts";
 import { resolveReferenceBudgetTokens } from "./session-reminders.ts";
 import { createBridgeTools, registerBridgeCapabilityDelegates } from "./tool-catalog-bridge.ts";
-import { readUserScript, executeUserScript } from "./user-script-runtime.ts";
+import { readUserScript, executeUserScript, persistUserScript, type UserScriptDef } from "./user-script-runtime.ts";
 import { summarizeToolParameters } from "./mcp/manager.ts";
 
 /** Matches the MCP config default; used when no manager config is available. */

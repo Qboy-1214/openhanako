@@ -717,7 +717,7 @@ export class Agent {
       getWorkflowSessionDir: () => path.join(this.agentDir, "workflow-sessions"),
       // M2-2：从 per-user 根加载声明式工作流的编译产物（users/<userId>/workflows/<id>/script.js）
       loadWorkflowScript: (workflowId: string) => {
-        const home = this.hanakoHome || path.dirname(path.dirname(this.agentDir)) || this._cb?.getEngine?.()?.hanakoHome;
+        const home = this._cb?.getEngine?.()?.hanakoHome || path.dirname(path.dirname(this.agentDir));
         if (!home || !workflowId) return null;
         const file = path.join(home, "workflows", workflowId, "script.js");
         if (!fs.existsSync(file)) return null;

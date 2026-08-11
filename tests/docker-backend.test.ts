@@ -22,7 +22,6 @@ describe("M2-3 docker backend selection", () => {
       getExternalReadPaths: () => [],
       getSandboxNetworkEnabled: () => false,
     });
-    // @ts-expect-error 覆盖内部 spawnAndStream 不可行，仅验证签名形态
     expect(typeof exec).toBe("function");
   });
 

@@ -166,6 +166,7 @@ export function createBridgeTools({
   resolveMcpPermission,
   resolveBuiltinInvocation,
   builtinCall,
+  userScriptExecutor,
   log,
 }: BridgeToolDeps) {
   const searchTool = {

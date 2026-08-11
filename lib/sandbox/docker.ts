@@ -101,7 +101,7 @@ export function buildDockerArgs(
   }: {
     cwd?: string;
     env?: Record<string, string>;
-    image: string;
+    image?: string;
     additionalMounts?: string[];
     allowNetwork?: boolean;
     externalReadPaths?: string[];
@@ -109,6 +109,7 @@ export function buildDockerArgs(
   } = {},
 ) {
   const readAll = policy?.allowExternalReads !== false;
+  const img = image || process.env.HANAKO_SANDBOX_IMAGE || "ubuntu:22.04";
   const args = ["run", "--rm"];
 
   if (!allowNetwork) args.push("--network", "none");
@@ -151,7 +152,7 @@ export function buildDockerArgs(
   // 额外挂载（部署态注入）
   for (const m of additionalMounts) args.push("-v", m);
 
-  args.push(image);
+  args.push(img);
   return args;
 }
 

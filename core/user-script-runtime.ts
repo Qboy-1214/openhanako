@@ -65,7 +65,7 @@ export function registerUserScript(toolCatalog: any, userId: string, def: UserSc
   }]);
 }
 
-function runInVm(scriptJs: string, args: Record<string, unknown>, ctx: unknown, timeoutMs?: number): string {
+async function runInVm(scriptJs: string, args: Record<string, unknown>, ctx: unknown, timeoutMs?: number): Promise<string> {
   const logs: string[] = [];
   const sandbox: any = {
     args,
@@ -78,9 +78,10 @@ function runInVm(scriptJs: string, args: Record<string, unknown>, ctx: unknown, 
   const result = vm.runInNewContext(`(async () => { ${scriptJs} })()`, sandbox, {
     timeout: timeoutMs ?? 30_000,
   });
-  return Promise.resolve(result)
-    .then((r) => (logs.length ? logs.join("\n") + (r !== undefined ? "\n" + String(r) : "") : String(r ?? "")))
-    .catch((e) => `user script error: ${e?.message || String(e)}`);
+  const r = await result;
+  return logs.length
+    ? logs.join("\n") + (r !== undefined ? "\n" + String(r) : "")
+    : String(r ?? "");
 }
 
 /** 执行用户脚本。js/ts 走 vm 沙箱；py/sh 走 execBackend（bwrap/docker）。 */
