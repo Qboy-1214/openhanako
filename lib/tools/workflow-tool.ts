@@ -35,6 +35,9 @@ function buildParameters() {
     resumeFromRunId: Type.Optional(Type.String({
       description: "Previous workflow runId (taskId) to resume from — cached agent nodes with unchanged prompt+opts return instantly, first change onward re-executes.",
     })),
+    workflowId: Type.Optional(Type.String({
+      description: "M2-2: id of a compiled declarative workflow persisted under the user's root; when given, the script is loaded from disk instead of params.script.",
+    })),
     limits: Type.Optional(Type.Object({
       nodeTimeoutMs: Type.Optional(Type.Number()),
       idleTimeoutMs: Type.Optional(Type.Number()),
@@ -164,6 +167,17 @@ export function createWorkflowTool(deps) {
     description: WORKFLOW_DESCRIPTION,
     parameters: buildParameters(),
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+      // M2-2：workflowId 给定的声明式工作流从 per-user 根加载编译产物 script.js
+      if (params.workflowId) {
+        if (typeof deps.loadWorkflowScript !== "function") {
+          return toolError(t("tool.workflow.scriptInvalid", { message: "workflow loader not configured" }));
+        }
+        const loaded = deps.loadWorkflowScript(params.workflowId);
+        if (loaded == null) {
+          return toolError(t("tool.workflow.scriptInvalid", { message: `workflow ${params.workflowId} not found` }));
+        }
+        params = { ...params, script: loaded };
+      }
       const parentSessionPath = getToolSessionPath(ctx) || deps.getSessionPath?.() || null;
       const parentSessionRef = sessionRefForPath(deps, parentSessionPath);
       const parentSessionId = parentSessionRef?.sessionId || null;

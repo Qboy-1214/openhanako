@@ -715,6 +715,18 @@ export class Agent {
       getJournalDir: () => path.join(this.agentDir, "workflow-journals"),
       // workflow node session 是审计证据，不能落到 executeIsolated 默认 .ephemeral 后被删掉。
       getWorkflowSessionDir: () => path.join(this.agentDir, "workflow-sessions"),
+      // M2-2：从 per-user 根加载声明式工作流的编译产物（users/<userId>/workflows/<id>/script.js）
+      loadWorkflowScript: (workflowId: string) => {
+        const home = this.hanakoHome || path.dirname(path.dirname(this.agentDir)) || this._cb?.getEngine?.()?.hanakoHome;
+        if (!home || !workflowId) return null;
+        const file = path.join(home, "workflows", workflowId, "script.js");
+        if (!fs.existsSync(file)) return null;
+        try {
+          return fs.readFileSync(file, "utf8");
+        } catch {
+          return null;
+        }
+      },
     });
 
     // 14. Interactive Card 工具（设计手册 + 渲染工具）
