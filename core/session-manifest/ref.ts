@@ -4,6 +4,8 @@ export type SessionRef = {
   legacySessionPath?: string | null;
 };
 
+import { registerSessionOwner } from "./owner.ts";
+
 export function textOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -62,5 +64,8 @@ export function ensureSessionRefForPath(store: any, sessionPath: unknown, input:
       `Session manifest could not be established for locator: ${stableSessionPath}`,
     );
   }
+  // P0-2 Step 0：session 建立时补写 owner 映射（若调用方提供 ownerUserId）。
+  // 无前缀的会话形态（bridge/* 等）依赖此索引在广播时反查 owner；前缀会话由 resolveOwnerUserId 自动回退。
+  if (input?.ownerUserId) registerSessionOwner(currentPath, input.ownerUserId);
   return { sessionId, sessionPath: currentPath };
 }
