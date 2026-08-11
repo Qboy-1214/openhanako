@@ -43,7 +43,7 @@
 - [ ] **Step 1: Write the failing test for owner resolution**
 ```ts
 import { describe, it, expect } from "vitest";
-import { resolveOwnerUserId } from "../../core/session-manifest/owner";
+import { resolveOwnerUserId, registerSessionOwner } from "../../core/session-manifest/owner";
 
 describe("session -> ownerUserId mapping", () => {
   it("resolves owner from per-user sessionPath", () => {
@@ -582,7 +582,9 @@ import * as path from "path";
 export interface UserScriptDef { name: string; paramSchema: any; runtime: "js"|"ts"|"py"|"sh"; src: string; }
 
 export async function persistUserScript(userId: string, id: string, def: UserScriptDef, hanakoHome: string) {
-  // 基于 engine.hanakoHome 构造绝对路径（M2 架构约定的 per-user 根），不依赖不可控的 CWD
+  // engine.hanakoHome 是顶层根目录（实测 server/index.ts:440 baseDir = dirname(hanakoHome)），
+  // 非 users/<userId> 子目录。故 path.join(hanakoHome, "users", userId, ...) 是单层正确路径，
+  // 结果形如 <root>/users/<userId>/tools/<id>；不要误删 "users" 段（那会落盘到错误位置）。
   const dir = path.join(hanakoHome, "users", userId, "tools", id);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, "manifest.json"), JSON.stringify(def, null, 2));
@@ -613,8 +615,9 @@ app.post("/api/tools", async (c) => {
   const userId = c.get("principal").userId;
   const def = await c.req.json();
   const id = crypto.randomUUID();
-  await persistUserScript(userId, id, def);
   const engine = getEngine(c);
+  // engine.hanakoHome 是顶层根目录（如 /data/hanako），非 users/<userId> 子目录；
+  // persistUserScript 内部用 path.join(hanakoHome, "users", userId, ...) 拼出单层正确路径
   await persistUserScript(userId, id, def, engine.hanakoHome); // 绝对路径落盘到 per-user 根
   await registerUserScript(engine.toolCatalog, userId, def); // 热注册，无需重启
   return c.json({ id, status: "registered" });
@@ -692,6 +695,7 @@ app.post("/api/workflows", async (c) => {
   const graph = await c.req.json();
   const js = compileWorkflow(graph); // 编译器归属服务端
   const id = crypto.randomUUID();
+  const engine = getEngine(c); // F1：解析 per-user engine
   await fs.writeFile(path.join(engine.hanakoHome, "users", userId, "workflows", id, "script.js"), js);
   return c.json({ id, status: "compiled" });
 });
@@ -748,19 +752,20 @@ git commit -m "test(m2): full integration green — P0 closure + M2 tools/sandbo
 
 **3. Type consistency:** `resolveOwnerUserId` (Task 0) → 用于 Task 3；`createDockerExec` 签名 (Task 5) 与 `createBwrapExec` 同构；`registerUserScript`/`compileWorkflow` 命名跨 Task 一致；落盘均统一 `path.join(engine.hanakoHome, "users", ...)` 绝对路径。
 
-**4. Spec deviations / real-bug fixes closed in this revision (peer review round 2):**
-- 🔴 Task 0 测试 case 3：`resolveOwnerUserId("bridge/b1")` 依赖 Step 0 索引，补 `registerSessionOwner("bridge/b1","u_alice")` 前置，否则两种解析路径均返回 null → 测试 FAIL。
-- 🔴 Task 2：`bindEngineToWs` 增加 `onReady` 形参，flush 逻辑留在 chat.ts `onOpen` 闭包内执行（handleWsMessage 是 chat.ts 局部函数，外部模块不可引用）。
-- 🔴 Task 7/8 落盘：`path.join("users",...)` 相对路径依赖 CWD → 改为 `path.join(engine.hanakoHome, "users", ...)` 绝对路径（M2 per-user 根约定）。
-- 🟡 Task 8 测试：`runWorkflowScript(script, hostApi, opts)` 第 2 参为 hostApi 对象（注入沙箱全局），流式经 hostApi 注入验证，非 `opts.onEvent`（已核实 lib/workflow 无 onEvent）。
-- 🟡 Task 3 broadcast：`record` 即 `clients` map 的 value（createWsClientRecord 产出），实现时统一用 `record` 访问 `record.principal.userId`，仅命名一致性提醒，无运行时风险。
+**4. Spec deviations / real-bug fixes closed in prior review rounds:**
+- Round 1：P0-2 解析失败 fail-closed 丢弃+warn（Task 3 Step 3 + 新测试）；P0-4 补 `policy.ts` 纵深规则（禁止读其他用户/SystemDB，REARCHITECTURE §8.8.6）+ SystemDB 测试（Task 1 Step 4）；P0-3 F1 返回 401（Task 4 Step 3）；M2-2 流式测试（Task 8 Step 1）；M2-1 目录监听为可选（标注）。
+- Round 2：
+  - 🔴 Task 0 测试 case 3 补 `registerSessionOwner("bridge/b1","u_alice")` 前置（否则解析返回 null → FAIL）。
+  - 🔴 Task 2：`bindEngineToWs` 增加 `onReady` 形参，flush 留在 chat.ts `onOpen` 闭包内（handleWsMessage 是局部函数，外部模块不可引用）。
+  - 🔴 Task 7/8 落盘：`path.join("users",...)` 相对路径依赖 CWD → 改为 `path.join(engine.hanakoHome, "users", ...)` 绝对路径。
+  - 🟡 Task 8 测试：`runWorkflowScript(script, hostApi, opts)` 第 2 参为 hostApi（注入沙箱全局），流式经 hostApi 验证，非 `opts.onEvent`。
+  - 🟡 Task 3 broadcast：`record` 即 clients map value，统一用 `record.principal.userId`。
 
-**4. Spec deviations closed in this revision:**
-- P0-2 解析失败（带 sessionPath 但 owner 未知）→ fail-closed 丢弃 + warn（Task 3 Step 3 + 新测试），非全广播；ownerUserId===undefined 才全广播（全局事件）。
-- P0-4 补 `policy.ts` 纵深规则（禁止读其他用户目录 / SystemDB，REARCHITECTURE §8.8.6）+ SystemDB 测试（Task 1 Step 4）。
-- P0-3 F1 解析失败返回 401（Task 4 Step 3）。
-- M2-2 测试补流式事件透传断言（Task 8 Step 1）。
-- M2-1「监听 tools 目录变更」为可选增强，本 plan 仅实现 POST handler 触发热注册（spec 允许二选一）。
+**5. Real-bug fixes closed in this revision (peer review round 3):**
+- 🔴 错误 A（Task 0 import）：line 46 原只导入 `resolveOwnerUserId`，case 3 调了 `registerSessionOwner` 未导入 → 测试 FAIL。已补 `import { resolveOwnerUserId, registerSessionOwner } from "../../core/session-manifest/owner"`。
+- 🔴 错误 C（Task 8 Step 4）：`POST /api/workflows` handler 内引用 `engine.hanakoHome` 但缺 `const engine = getEngine(c)` → 运行时崩溃。已在 `fs.writeFile` 前补 `const engine = getEngine(c)`。
+- 🔴 错误 B（重复调用）：Task 7 Step 4 残留旧签名 `persistUserScript(userId, id, def)`（无 hanakoHome），与新调用重复落盘。已删除残留行，仅保留 `persistUserScript(userId, id, def, engine.hanakoHome)`。
+- 🔴 错误 B（路径「双重」前提纠正）：用户判定 `path.join(hanakoHome,"users",userId,...)` 会双重（`baseDir/users/<userId>/users/<userId>/...`）。**实测不成立**：`engine.hanakoHome` 是顶层根目录（server/index.ts:440 `baseDir = dirname(hanakoHome)` 反证 hanakoHome 即根，如 `/data/hanako`），故该拼接为单层正确路径（`<root>/users/<userId>/tools/<id>`）。用户混淆了 P0-4 传给 `deriveSandboxPolicy` 的 sandbox 视角 `hanakoHome`（=`baseDir/users/<userId>`）与 `engine.hanakoHome` 字段（根目录）两套语义。已在 persistUserScript 与 Step 4 注释中明确此区分，路径写法维持不变。
 
 **5. Explicitly out of scope (spec §6.1 跨里程碑待办，归 M5，本 plan 不实现):**
 - `.env.example` 创建（含 `HANAKO_SANDBOX_BACKEND` 默认值与安全含义）
