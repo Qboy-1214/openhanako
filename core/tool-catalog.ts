@@ -20,7 +20,9 @@
 
 import { estimateTextTokens } from "../lib/llm/estimate-text-tokens.ts";
 
-export type ToolCatalogOrigin = "mcp" | "builtin";
+// M2-1：新增 "user" 来源（用户脚本工具）。原枚举仅 mcp|builtin，用户脚本会被
+// normalizeEntry 静默降级为 mcp，进而在 tool-catalog-bridge 走 mcpCall 错误路径。
+export type ToolCatalogOrigin = "mcp" | "builtin" | "user";
 
 export interface ToolCatalogEntryInput {
   /**
@@ -159,7 +161,8 @@ function normalizeEntry(input: ToolCatalogEntryInput): ToolCatalogEntry {
     // prefix, so a source that forgets the field does not silently opt out.
     deferrable: input.deferrable !== false,
     pinned: input.pinned === true,
-    origin: input.origin === "builtin" ? "builtin" : "mcp",
+    // M2-1：保留 user 来源，禁止静默降级为 mcp（否则用户脚本会误走 mcpCall 路径）。
+    origin: input.origin === "builtin" ? "builtin" : input.origin === "user" ? "user" : "mcp",
     schemaRef: input.schemaRef,
   });
 }
