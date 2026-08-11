@@ -615,8 +615,8 @@ app.post("/api/tools", async (c) => {
   const def = await c.req.json();
   const id = crypto.randomUUID();
   const engine = getEngine(c);
-  // engine.hanakoHome 是顶层根目录（如 /data/hanako），非 users/<userId> 子目录；
-  // persistUserScript 内部用 path.join(hanakoHome, "users", userId, ...) 拼出单层正确路径
+  // 双根模型（open-root.ts:21）：per-user engine.hanakoHome = <baseDir>/users/<userId>（已含 users 段），
+  // persistUserScript 内部用 path.join(hanakoHome, "tools", id) 落盘（不再拼 users/userId）
   await persistUserScript(userId, id, def, engine.hanakoHome); // 绝对路径落盘到 per-user 根
   await registerUserScript(engine.toolCatalog, userId, def); // 热注册，无需重启
   return c.json({ id, status: "registered" });
@@ -752,7 +752,7 @@ git commit -m "test(m2): full integration green — P0 closure + M2 tools/sandbo
 
 **2. Placeholder scan:** 无 TBD/TODO；每个 code step 含完整片段；测试含实际断言。
 
-**3. Type consistency:** `resolveOwnerUserId` (Task 0) → 用于 Task 3；`createDockerExec` 签名 (Task 5) 与 `createBwrapExec` 同构；`registerUserScript`/`compileWorkflow` 命名跨 Task 一致；落盘均统一 `path.join(engine.hanakoHome, "users", ...)` 绝对路径。
+**3. Type consistency:** `resolveOwnerUserId` (Task 0) → 用于 Task 3；`createDockerExec` 签名 (Task 5) 与 `createBwrapExec` 同构；`registerUserScript`/`compileWorkflow` 命名跨 Task 一致；落盘统一基于 `engine.hanakoHome`（双根模型：per-user 引擎 hanakoHome 已含 `users/<userId>` 段），故 Task 7 用 `path.join(hanakoHome, "tools", id)`、Task 8 用 `path.join(engine.hanakoHome, "workflows", id)`。
 
 **4. Spec deviations / real-bug fixes closed in prior review rounds:**
 - Round 1：P0-2 解析失败 fail-closed 丢弃+warn（Task 3 Step 3 + 新测试）；P0-4 补 `policy.ts` 纵深规则（禁止读其他用户/SystemDB，REARCHITECTURE §8.8.6）+ SystemDB 测试（Task 1 Step 4）；P0-3 F1 返回 401（Task 4 Step 3）；M2-2 流式测试（Task 8 Step 1）；M2-1 目录监听为可选（标注）。
