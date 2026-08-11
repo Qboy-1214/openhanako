@@ -1,5 +1,5 @@
 /**
- * workflows.ts — M2-2 无代码工作流管理路由（POST /api/workflows）
+ * user-workflows.ts — M2-2 无代码工作流管理路由（POST /api/workflows）
  *
  * 接收声明式工作流图，服务端编译为 JS，落盘到 per-user 根的
  * users/<userId>/workflows/<id>/script.js。workflow-tool 经 workflowId 读回执行。

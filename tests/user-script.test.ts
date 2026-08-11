@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { persistUserScript, readUserScript, registerUserScript, executeUserScript, type UserScriptDef } from "../core/user-script-runtime.ts";
+import { readUserScript, executeUserScript, type UserScriptDef } from "../core/user-script-runtime.ts";
+import { persistUserScript, registerUserScript } from "../server/tools/register-user-script.ts";
 import { ToolCatalog } from "../core/tool-catalog.ts";
 
 const base = fs.mkdtempSync(path.join(os.tmpdir(), "m2-userscript-"));

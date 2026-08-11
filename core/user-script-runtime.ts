@@ -50,21 +50,6 @@ export function readUserScript(userId: string, id: string, hanakoHome: string): 
   }
 }
 
-/**
- * 将用户脚本转为 ToolCatalogEntryInput 并幂等热注册到该用户的 catalog。
- * origin="user"（不会静默降级为 mcp，端到端走 user 调用分支）。
- */
-export function registerUserScript(toolCatalog: any, userId: string, def: UserScriptDef): void {
-  toolCatalog.replaceSource(`user:${userId}`, [{
-    name: def.name,
-    serverId: `user:${userId}`,
-    origin: "user",
-    description: def.description,
-    paramsSummary: def.paramsSummary,
-    schemaRef: () => def.schema ?? { type: "object", properties: {} },
-  }]);
-}
-
 async function runInVm(scriptJs: string, args: Record<string, unknown>, ctx: unknown, timeoutMs?: number): Promise<string> {
   const logs: string[] = [];
   const sandbox: any = {

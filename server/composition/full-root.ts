@@ -19,8 +19,8 @@ import { createAvatarRoute } from "../routes/avatar.ts";
 import { createCharacterCardsRoute } from "../routes/character-cards.ts";
 import { createCardsRoute } from "../routes/cards.ts";
 import { createDeskRoute } from "../routes/desk.ts";
-import { createUserScriptRoute } from "../routes/user-scripts.ts";
-import { createWorkflowRoute } from "../routes/workflows.ts";
+import { createUserToolsRoute } from "../routes/user-tools.ts";
+import { createWorkflowRoute } from "../routes/user-workflows.ts";
 import { createDiaryRoute } from "../routes/diary.ts";
 import { builtinImageGenAdapters } from "../../core/media-adapters/builtin-adapters.ts";
 
@@ -32,7 +32,7 @@ export function registerClosedRoutes(app: Hono, ctx: CompositionContext): void {
   app.route("/api", createCharacterCardsRoute(getUserEngine));
   app.route("/api", createCardsRoute(engine));
   app.route("/api", createDeskRoute(getUserEngine, hub));
-  app.route("/api", createUserScriptRoute(getUserEngine));
+  app.route("/api", createUserToolsRoute(getUserEngine));
   app.route("/api", createWorkflowRoute(getUserEngine));
   app.route("/api", createDiaryRoute(engine));
 }
