@@ -36,6 +36,8 @@ import {
   appendSessionStreamEvent,
   resumeSessionStream,
 } from "../session-stream-store.ts";
+import { resolveOwnerUserId } from "../../core/session-manifest/owner.ts";
+import { matchesBroadcastOwner } from "../ws/broadcast-owner.ts";
 import { visiblePromptText } from "../../core/session-reminders.ts";
 import { AppError } from "../../shared/errors.ts";
 import { errorBus } from "../../shared/error-bus.ts";
@@ -552,7 +554,10 @@ export function createChatRoute(
     return { ...msg, studioId };
   }
 
-  function broadcast(msg) {
+  // P0-2: 按 ownerUserId 过滤广播。ownerUserId 为 undefined → 全局事件（系统级，无 owner 维度）全扇出；
+  //       ownerUserId 为 string → 仅发给该用户 ws（其他用户收不到，跨用户隔离）；
+  //       ownerUserId 为 null → 带 sessionPath 但 owner 解析失败，调用方已 fail-closed 丢弃，不传此值。
+  function broadcast(msg, { ownerUserId } = {}) {
     const hardenedMsg = hardenStudio(msg);
     // 扇出前解析一次 sessionId（不随每个订阅者重复解析）：event 本身若已带
     // sessionId（如 createSessionStreamEventWsMessage 产出的流事件）优先用它，
@@ -566,6 +571,7 @@ export function createChatRoute(
     let serialized = null;
     for (const [clientWs, client] of clients) {
       if (clientWs.readyState !== 1) continue; // OPEN
+      if (!matchesBroadcastOwner(client, ownerUserId)) continue; // P0-2 owner 过滤
       if (wsClientCanReceiveEvent(client, hardenedMsg, { resolvedSessionId })) {
         if (serialized === null) serialized = JSON.stringify(hardenedMsg);
         wsSendSerialized(clientWs, serialized);
@@ -624,14 +630,20 @@ export function createChatRoute(
 
   function emitStreamEvent(sessionPath, ss, event) {
     const entry = appendSessionStreamEvent(ss, event);
-    // Phase 4: 始终广播所有事件，前端按 sessionPath 路由到对应 panel
+    // P0-2: 解析 owner；带 sessionPath 但 owner 未知 → fail-closed 丢弃 + warn，不广播（不跨用户泄露）
+    const ownerUserId = sessionPath ? resolveOwnerUserId(sessionPath) : undefined;
+    if (ownerUserId === null) {
+      debugLog()?.warn?.("p0-2 drop stream event: owner unresolved", { sessionPath });
+      return entry;
+    }
+    // Phase 4: 始终广播所有事件，前端按 sessionPath 路由到对应 panel；仅发给 owner 用户 ws
     broadcast(createSessionStreamEventWsMessage({
       sessionPath,
       sessionId: sessionIdForPath(sessionPath),
       sessionEvent: event,
       streamId: entry.streamId,
       seq: entry.seq,
-    }));
+    }), { ownerUserId });
     return entry;
   }
 
