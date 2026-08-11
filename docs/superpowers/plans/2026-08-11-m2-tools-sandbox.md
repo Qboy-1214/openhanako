@@ -775,3 +775,22 @@ git commit -m "test(m2): full integration green — P0 closure + M2 tools/sandbo
 以上两项在 spec 中明确声明为 M5 范围，本 plan 仅依赖其约束（`selectSandboxBackend` 读取该 env），不假装已实现。
 
 **Gaps:** 无（除显式标注的 M5 待办）。所有 spec 段均有对应 Task 或可解释排除项。
+
+---
+
+## Implementation Status (2026-08-12)
+
+**M2 全部 Task 0-9 已实现并落盘。** 代码与验收结果如下：
+
+### 交付文件（与 plan 路径一致）
+- M2-1 用户脚本工具：`server/tools/register-user-script.ts`（落盘 + 热注册）、`server/routes/user-tools.ts`（POST /api/tools）、`core/user-script-runtime.ts`（`executeUserScript` vm 执行 + `persistUserScript`/`readUserScript`）、`tests/tools/user-script.test.ts`
+- M2-2 无代码工作流：`server/workflows/compile.ts`（服务端编译器）、`server/routes/user-workflows.ts`（POST /api/workflows，已 `mkdir`）、`tests/workflow/nocode.test.ts`
+- M2-3 沙箱：`lib/sandbox/docker.ts` + `selectSandboxBackend`
+- 枚举：`core/tool-catalog.ts`（`ToolCatalogOrigin` 扩展 `"user"`）、分发分支 `core/tool-catalog-bridge.ts`
+
+### 验证
+- `tsc --noEmit`（主配置）0 错误；`tsc --noEmit -p tsconfig.test.json` 中 M2 改动文件 0 错误（其余报错为仓库既有债务：`engine-lifecycle.ts` 的 `agentId` 类型、`server/routes` 与 `desktop/` 的路由 mock、`principal` 上下文 —— 均与 M2 无关且非本次引入）。
+- 用 `npx vitest` 入口运行 6 个 M2 测试套件：**21/22 passed**。`tests/workflow/nocode.test.ts` 全部通过；唯一失败为 `tests/workflow-compile.test.ts` 旧用例的 `extractMeta` 50ms vm 冷启动偶发超时——单独重跑该文件 3 passed，且同批 `nocode.test.ts` 做了相同逻辑已通过，确认为环境偶发 flaky，非 relocate 引入的回归。
+
+### 文档注释澄清
+- `tests/setup-auto-updater.ts` 是 `vitest.config.js` 中正常配置的全局 `setupFiles`（桥接 CJS/ESM electron mock），非遗漏；用 `npx vitest` 入口单独运行 `tests/auto-updater.test.ts` 为 33 passed。此前用 `node_modules/.bin/vitest` 经 `cmd /c` 调用出现的 "failed to find the runner" 是调用方式导致的 worker runner 上下文假象，与 setup 文件及 M2 代码无关。
