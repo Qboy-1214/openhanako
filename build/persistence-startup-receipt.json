@@ -550,6 +550,16 @@
       "breakingMigrationRequiresAccessMove": false
     },
     {
+      "id": "shared-assets-sqlite",
+      "firstPossibleOpenPhase": "engine_construct",
+      "firstPossibleWritePhase": "engine_construct",
+      "opensBeforeFutureCoordinator": false,
+      "writesBeforeFutureCoordinator": false,
+      "bootstrapSafety": null,
+      "preCoordinatorReadProjection": null,
+      "breakingMigrationRequiresAccessMove": false
+    },
+    {
       "id": "signed-artifacts",
       "firstPossibleOpenPhase": "desktop_bootstrap",
       "firstPossibleWritePhase": "desktop_bootstrap",

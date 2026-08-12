@@ -947,4 +947,34 @@ git commit -m "test(m3): full integration green — Sharing Market end-to-end"
 
 ## Implementation Status
 
-> 待实现后回填（参照 M2 plan 末尾 Implementation Status 章节格式）。
+> 状态：**已实现并验证**（代码落盘于 commit `a85a614c`「feat(m3): implement Sharing Market」及其后续 fix commits）。
+
+### 实际交付文件
+- `server/sharing/store.ts` — `SharingAssetStore`（独立 sqlite class，仿 `lib/memory/fact-store.ts` 的 `PRAGMA user_version` 迁移，v0→v1）。
+- `server/sharing/index.ts` — `SharingMarket` 业务逻辑（publish/discover/getAsset/install/unpublish/listMine/transferOnDelete）。
+- `shared/persistence/store-registry.ts` — 新增 `shared-assets-sqlite` defineStore（仿 `session-manifest-sqlite`）；v1 schema（compatible addition）。
+- `server/composition/full-root.ts` — `registerClosedRoutes` 内挂载 `createSharingRoute`。
+- `core/engine.ts` — `scanLocalInstalls` / `getLocalInstalls`（启动扫描预填 catalog）、fork 落盘 `forkedFrom` + `sandboxed` 标记。
+- 前端 `market` tab（Zustand `currentTab` 系统 + `AppPages.tsx` 条件渲染 + MarketPage/AssetDetailPage/PublishForm/MyAssetsPage/PublishFromPrivateList + `SharingTab.tsx` 保留截图设置仅加跳转入口 + marketApi）。
+
+### 持久化基线（Persistence Inventory / Schema Tripwire）落地
+M3 新增的 `shared-assets-sqlite` 需通过仓库的持久化监控体系（`scripts/scan-persistent-stores.mjs` inventory census + `scripts/generate-persistence-schema-fingerprint.mjs` Schema Tripwire）。落地时补齐了以下注册：
+
+1. **Store 注册**：`shared-assets-sqlite` 以 `format:"sqlite"` + `schemaSource:{kind:"sqlite-runtime", module:"server/sharing/store.ts", contract:"SharingAssetStore"}` + `openEntry:["new SharingAssetStore"]` + `pathPatterns:["system/shared-assets.db", ...]` + `siteRules` 注册，census 校验通过并落盘至 `build/persistence-store-inventory.json`（库内现有 62 stores / 793 sites）。
+
+2. **Runtime introspector**：在 `scripts/generate-persistence-schema-fingerprint.mjs` 新增 `sharedAssetsSchema()`，通过 `SharingAssetStore` 动态挂载提取 runtime schema（对齐 `file-history-sqlite` 等做法）。Schema 指纹以 `compatible` 分类重新生成并落盘 `build/persistence-schema-fingerprint.json`（`shared-assets-sqlite` v1, compatibility-reason「Added shared-assets-sqlite for M3 Sharing Market」）。
+
+3. **上游持久化 site 豁免补全**（主干后续新增写操作未注册，M3 验收时一并补齐，集中在 `shared/persistence/store-registry.ts` 的 `PERSISTENCE_EXEMPTIONS`）：
+   - `register-bookkeeping-on-register` — 放行注册流程对系统/用户空间目录的 `mkdir`、进程级锁文件 `write-file`/`rename`/`remove-path`（具体 `users.json`/`local-user-auth.json` 由已注册 store 接管）。
+   - `user-home-destruction-on-unregister` — 放行 `unregister.ts` 硬删除用户空间时的 `remove-path`（级联清理，不形成独立 store 身份）。
+   - `user-workflows-runtime` — 放行 `user-workflows.ts` 编译器为每个用户写出可再生产物（workflows 脚本/图谱）的 `mkdir`/`write-file`。
+   - 为 `user-studio-registries` store 补 `unregister.ts` 的 `write-file`/`rename` siteRule（原子更新 `users.json`）。
+
+### 验证结果
+- `node scripts/scan-persistent-stores.mjs` → 干净 inventory（62 stores / 793 sites），无 unregistered site。
+- `npx vitest run tests/persistence-schema-tripwire.test.ts tests/persistence-store-registry.test.ts` → **29 passed / 29**（注：全量扫描/指纹生成用例单条耗时 9.7s~21.4s，`vitest.config.js` 的 `testTimeout` 已从 `10_000` 提升至 `30_000` 以免默认配置下误报超时）。
+- 字段命名映射（`rowToMeta` 双向 camelCase↔snake_case）、错误表、双根路径模型均与 spec 一致。
+
+### 已知偏差（与 spec 对齐时已记录）
+- spec §2.4「缺失 principal → 403」以代码为准返回 **401**；越权操作维持 403。
+- localStorage 前端缓存、自动覆盖/静默升级、注销转移 ADR-12.5 触发链路、B 级市场归 out-of-scope（spec §6 声明）。

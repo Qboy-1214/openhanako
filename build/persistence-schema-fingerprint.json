@@ -476,6 +476,19 @@
       "sourceFile": "core/local-user-account.ts"
     },
     {
+      "expiresOn": "2026-12-31",
+      "id": "register-bookkeeping-on-register",
+      "kinds": [
+        "mkdir",
+        "write-file",
+        "rename",
+        "remove-path"
+      ],
+      "ownerModule": "server/auth/register.ts",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "sourceFile": "server/auth/register.ts"
+    },
+    {
       "expiresOn": "2027-01-31",
       "id": "sandbox-command-output",
       "kinds": [
@@ -588,6 +601,41 @@
       "sourceFile": "lib/resource-io/providers/url-provider.ts"
     },
     {
+      "expiresOn": "2026-12-31",
+      "id": "user-home-destruction-on-unregister",
+      "kinds": [
+        "remove-path"
+      ],
+      "ownerModule": "server/auth/unregister.ts",
+      "reason": "Hard-delete removes the per-user business home directory whose owned stores are being destroyed with the account; no independent store identity is formed or preserved by the rmSync.",
+      "sourceFile": "server/auth/unregister.ts"
+    },
+    {
+      "expiresOn": "2026-12-31",
+      "id": "user-tools-runtime",
+      "kinds": [
+        "mkdir",
+        "write-file",
+        "atomic-write",
+        "rename",
+        "remove-path"
+      ],
+      "ownerModule": "core/user-script-runtime.ts",
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "sourceFile": "core/user-script-runtime.ts"
+    },
+    {
+      "expiresOn": "2026-12-31",
+      "id": "user-workflows-runtime",
+      "kinds": [
+        "mkdir",
+        "write-file"
+      ],
+      "ownerModule": "server/routes/user-workflows.ts",
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "sourceFile": "server/routes/user-workflows.ts"
+    },
+    {
       "expiresOn": "2027-01-31",
       "id": "windows-uia-request-temp",
       "kinds": [
@@ -668,7 +716,7 @@
     ],
     "version": 3
   },
-  "payloadFingerprint": "sha256:0103b3720cdb56ff9011510d4ca15ccbfadd96cbd136db347f30daa8a47c3fd5",
+  "payloadFingerprint": "sha256:4eb285ebe73b84105f07d32c95cbc9582210fbeac54df6053b5c50e6251c2702",
   "registry": [
     {
       "affectedByEpochMigration": true,
@@ -2636,6 +2684,45 @@
       }
     },
     {
+      "affectedByEpochMigration": true,
+      "bootstrapSafety": null,
+      "checkpointPolicy": "Included in a future epoch checkpoint unless the coordinator explicitly classifies it otherwise.",
+      "epochPolicy": "epoch-managed",
+      "exemption": null,
+      "firstPossibleOpenPhase": "engine_construct",
+      "firstPossibleWritePhase": "engine_construct",
+      "format": "sqlite",
+      "id": "shared-assets-sqlite",
+      "identityContract": "asset id is the durable shared identity owned by ownerId; forkedFrom links lineage.",
+      "migrationEntry": [],
+      "openEntry": [
+        "new SharingAssetStore"
+      ],
+      "ownerModule": "server/sharing/store.ts",
+      "pathExclusions": [],
+      "pathKind": "tree",
+      "pathPattern": "system/shared-assets.db",
+      "pathPatterns": [
+        "system/shared-assets.db",
+        "system/shared-assets.db-wal",
+        "system/shared-assets.db-shm",
+        "system/shared/**"
+      ],
+      "preCoordinatorReadProjection": null,
+      "protocolModules": [],
+      "restorePolicy": "Restore only through the owning module after reader compatibility is established.",
+      "schemaContract": {
+        "compatibility": "The named runtime reader is canonical; this inventory does not imply stricter validation than runtime currently performs.",
+        "kind": "runtime-source",
+        "source": "server/sharing/store.ts"
+      },
+      "schemaSource": {
+        "contract": "SharingAssetStore runtime DDL and store-local PRAGMA user_version",
+        "kind": "sqlite-runtime",
+        "module": "server/sharing/store.ts"
+      }
+    },
+    {
       "affectedByEpochMigration": false,
       "bootstrapSafety": {
         "compatibility": "epoch-independent",
@@ -3118,8 +3205,8 @@
   ],
   "review": {
     "classification": "compatible",
-    "compatibilityReason": "Adds the new file-history-sqlite store to the inventory; no existing store's schema, reader, or on-disk layout changes. The per-workspace history database is created on first open and carries its own meta.schema_version, so homes without it stay readable.",
-    "payloadFingerprint": "sha256:0103b3720cdb56ff9011510d4ca15ccbfadd96cbd136db347f30daa8a47c3fd5"
+    "compatibilityReason": "Added shared-assets-sqlite for M3 Sharing Market",
+    "payloadFingerprint": "sha256:4eb285ebe73b84105f07d32c95cbc9582210fbeac54df6053b5c50e6251c2702"
   },
   "schemas": [
     {
@@ -3281,7 +3368,7 @@
       "contract": "bounded base64 cover upload temporary-directory lifecycle",
       "kind": "directory-contract",
       "module": "server/routes/desk.ts",
-      "sourceHash": "sha256:dea9b2e28eaf8310c7edab9f8ad5cf477c04ad89b92d592adbd9af873a7a217b",
+      "sourceHash": "sha256:a1cfa8c22c1f3b74d11f1cf60fc1e7a9b38be16825b31ebaf9aa5369e4099654",
       "storeId": "desk-cover-upload-staging"
     },
     {
@@ -3393,14 +3480,14 @@
       "contract": "sessionless upload naming and age-based cleanup protocol",
       "kind": "directory-contract",
       "module": "server/routes/upload.ts",
-      "sourceHash": "sha256:8c07b613a588bdc0ab2c2410ee1c0298188e3142ae188d52ee9880fbe947381c",
+      "sourceHash": "sha256:6bfbdcf8dfbe6f4304e0e3a002296d3271a09536b3a53b8c1c530c913e6f8c3a",
       "storeId": "legacy-upload-cache"
     },
     {
       "contract": "local authentication secret reader and atomic serializer",
       "kind": "runtime-contract",
       "module": "core/local-user-account.ts",
-      "sourceHash": "sha256:a91644f7d468bc3a50a0b434428f8b6a66938032484917bd1deb15556ee0bc63",
+      "sourceHash": "sha256:2d05fe2eb58dfc385749470071217b63442aed81210e909815e371ef3523cc73",
       "storeId": "local-user-auth"
     },
     {
@@ -3518,7 +3605,7 @@
       "contract": "server-info writer and desktop bootstrap reader",
       "kind": "runtime-contract",
       "module": "server/index.ts",
-      "sourceHash": "sha256:a63a67ce8d4f09cb70a3aaab7728146cae2dab7c32a6efa4e24bdf7efe7e36db",
+      "sourceHash": "sha256:03fd455ee575f252886ce7405d7227d5c6715420767145b996fe9eae57f9ad64",
       "storeId": "server-runtime-info"
     },
     {
@@ -3640,6 +3727,36 @@
       "module": "core/bridge-session-manager.ts",
       "sourceHash": "sha256:01155fe29dd0b3665ba940297e26ca0c6b566c0d27a9926a1ab8e4af710d2199",
       "storeId": "session-sidecars"
+    },
+    {
+      "contract": "SharingAssetStore runtime DDL and store-local PRAGMA user_version",
+      "kind": "sqlite-runtime",
+      "module": "server/sharing/store.ts",
+      "runtimeSchema": {
+        "objects": [
+          {
+            "name": "idx_shared_assets_kind",
+            "sql": "CREATE INDEX idx_shared_assets_kind ON shared_assets(asset_type)",
+            "tableName": "shared_assets",
+            "type": "index"
+          },
+          {
+            "name": "idx_shared_assets_owner",
+            "sql": "CREATE INDEX idx_shared_assets_owner ON shared_assets(owner_id)",
+            "tableName": "shared_assets",
+            "type": "index"
+          },
+          {
+            "name": "shared_assets",
+            "sql": "CREATE TABLE shared_assets ( id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, owner_handle TEXT NOT NULL DEFAULT '', asset_type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', homepage_url TEXT, forked_from TEXT, published_at TEXT NOT NULL, updated_at TEXT NOT NULL, install_count INTEGER NOT NULL DEFAULT 0 )",
+            "tableName": "shared_assets",
+            "type": "table"
+          }
+        ],
+        "userVersion": 1
+      },
+      "sourceHash": "sha256:4ef967abd322aac5483ea4f2d708219b32b833ad896273bcbb218dd4da495ac2",
+      "storeId": "shared-assets-sqlite"
     },
     {
       "contract": "signed artifact pointers, verified receipts, quarantine, lock, and OTA state protocol",
@@ -4539,6 +4656,22 @@
       "exemptionId": null,
       "kind": "secret-write",
       "ordinal": 1,
+      "reason": "Writes the local user authentication record.",
+      "sourceFile": "core/local-user-account.ts",
+      "storeId": "local-user-auth"
+    },
+    {
+      "exemptionId": null,
+      "kind": "secret-write",
+      "ordinal": 2,
+      "reason": "Writes the local user authentication record.",
+      "sourceFile": "core/local-user-account.ts",
+      "storeId": "local-user-auth"
+    },
+    {
+      "exemptionId": null,
+      "kind": "secret-write",
+      "ordinal": 3,
       "reason": "Writes the local user authentication record.",
       "sourceFile": "core/local-user-account.ts",
       "storeId": "local-user-auth"
@@ -5974,6 +6107,30 @@
       "reason": "Writes the studio mount registry.",
       "sourceFile": "core/studio-mounts.ts",
       "storeId": "studio-mount-registry"
+    },
+    {
+      "exemptionId": "user-tools-runtime",
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "sourceFile": "core/user-script-runtime.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "user-tools-runtime",
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "sourceFile": "core/user-script-runtime.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "user-tools-runtime",
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "sourceFile": "core/user-script-runtime.ts",
+      "storeId": null
     },
     {
       "exemptionId": null,
@@ -8704,6 +8861,94 @@
       "storeId": "office-render-jobs"
     },
     {
+      "exemptionId": "register-bookkeeping-on-register",
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "sourceFile": "server/auth/register.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "register-bookkeeping-on-register",
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "sourceFile": "server/auth/register.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "register-bookkeeping-on-register",
+      "kind": "remove-path",
+      "ordinal": 0,
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "sourceFile": "server/auth/register.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "register-bookkeeping-on-register",
+      "kind": "rename",
+      "ordinal": 0,
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "sourceFile": "server/auth/register.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "register-bookkeeping-on-register",
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "sourceFile": "server/auth/register.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "register-bookkeeping-on-register",
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "sourceFile": "server/auth/register.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "user-home-destruction-on-unregister",
+      "kind": "remove-path",
+      "ordinal": 0,
+      "reason": "Hard-delete removes the per-user business home directory whose owned stores are being destroyed with the account; no independent store identity is formed or preserved by the rmSync.",
+      "sourceFile": "server/auth/unregister.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": null,
+      "kind": "rename",
+      "ordinal": 0,
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "sourceFile": "server/auth/unregister.ts",
+      "storeId": "user-studio-registries"
+    },
+    {
+      "exemptionId": null,
+      "kind": "rename",
+      "ordinal": 1,
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "sourceFile": "server/auth/unregister.ts",
+      "storeId": "user-studio-registries"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "sourceFile": "server/auth/unregister.ts",
+      "storeId": "user-studio-registries"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "ordinal": 1,
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "sourceFile": "server/auth/unregister.ts",
+      "storeId": "user-studio-registries"
+    },
+    {
       "exemptionId": null,
       "kind": "append-file",
       "ordinal": 0,
@@ -9198,6 +9443,102 @@
       "reason": "resolveUploadTarget sends the same syntactic write sites to registered session-files storage when sessionPath is present or to the registered legacy uploads cache otherwise; flow-sensitive site attribution is required to distinguish them.",
       "sourceFile": "server/routes/upload.ts",
       "storeId": null
+    },
+    {
+      "exemptionId": "user-workflows-runtime",
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "sourceFile": "server/routes/user-workflows.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "user-workflows-runtime",
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "sourceFile": "server/routes/user-workflows.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": "user-workflows-runtime",
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "sourceFile": "server/routes/user-workflows.ts",
+      "storeId": null
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/index.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/index.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/index.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/index.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/index.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/index.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "write-file",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/index.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "database-open",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/store.ts",
+      "storeId": "shared-assets-sqlite"
+    },
+    {
+      "exemptionId": null,
+      "kind": "mkdir",
+      "ordinal": 0,
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "sourceFile": "server/sharing/store.ts",
+      "storeId": "shared-assets-sqlite"
     },
     {
       "exemptionId": null,

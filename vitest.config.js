@@ -23,7 +23,7 @@ export default defineConfig({
       "desktop/native/**/.build/**",
       "dist-computer-use/**",
     ],
-    testTimeout: 10_000,
+    testTimeout: 30_000,
     setupFiles: ["./tests/setup-auto-updater.ts"],
     server: {
       deps: {

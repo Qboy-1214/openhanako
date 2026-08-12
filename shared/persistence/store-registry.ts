@@ -271,6 +271,7 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
     siteRules: [
       ...rules(["core/server-identity.ts"], "Seeds user or studio identity registries.", ["atomic-write"], "(?:usersPath|studiosPath)"),
       ...rules(["core/local-user-account.ts"], "Updates the local user record in users.json.", ["secret-write"], "USERS_FILE"),
+      ...rules(["server/auth/unregister.ts"], "Soft or hard deletes the local user record atomically in users.json.", ["write-file", "rename"], "(?:tmp|p\\)$)"),
     ],
   }),
   defineStore({
@@ -1446,6 +1447,30 @@ export const PERSISTENCE_EXEMPTIONS: readonly PersistenceExemption[] = Object.fr
     "2027-01-31",
     ["write-file", "remove-path"],
     "tmpHtml",
+  ),
+  exemption(
+    "register-bookkeeping-on-register",
+    "server/auth/register.ts",
+    "server/auth/register.ts",
+    "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+    "2026-12-31",
+    ["mkdir", "write-file", "rename", "remove-path"],
+  ),
+  exemption(
+    "user-home-destruction-on-unregister",
+    "server/auth/unregister.ts",
+    "server/auth/unregister.ts",
+    "Hard-delete removes the per-user business home directory whose owned stores are being destroyed with the account; no independent store identity is formed or preserved by the rmSync.",
+    "2026-12-31",
+    ["remove-path"],
+  ),
+  exemption(
+    "user-workflows-runtime",
+    "server/routes/user-workflows.ts",
+    "server/routes/user-workflows.ts",
+    "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+    "2026-12-31",
+    ["mkdir", "write-file"],
   ),
   exemption(
     "desktop-skill-preview-temp",

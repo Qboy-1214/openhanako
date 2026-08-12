@@ -271,5 +271,27 @@ A 在 /market/mine 点「撤回」→ DELETE /api/sharing/assets/:id
 
 ## 5. Implementation Status
 
-> 本章节在实现完成后填写，记录实际交付文件、typecheck/vitest 结果、与 spec 的偏差。
-> 当前状态：**规划阶段，尚未实现（spec 审批通过，待转入 writing-plans）**。
+> 状态：**已实现并验证**（代码落盘于 commit `a85a614c`「feat(m3): implement Sharing Market」及后续 fix commits）。
+
+### 实际交付（对照 spec 各 §）
+- §2.1 索引表 `shared_assets`（全字段 + UNIQUE + 索引）→ `server/sharing/store.ts` `SharingAssetStore`（v1）。
+- §2.2 文件系统布局（`system/shared/<assetId>/source` 双轨 + `users/<userId>/` 双根）→ Task 1/4/5。
+- §2.3 SharingMarket 接口（publish/discover/getAsset/install/unpublish/listMine/transferOnDelete + Q11 randomUUID + ownerHandle/AccountLookup）→ `server/sharing/index.ts`。
+- §2.4 路由契约（6 端点 + Q1 `/api/sharing/mine` + Q10 白名单 + Q7 forkedFrom + Q11 existingAssetId + DiscoverItem `{items,total}`）→ `full-root.ts` `createSharingRoute`。
+- §2.5 分享管线（发布/安装/卸载/注销转移 + Q2 graph + Q7 forkedFrom + Q9 sandboxed）→ Task 4/5。
+- §2.6 前端四页（新增 `market` tab，Zustand `currentTab`，非 router）→ Task 6。
+- §3 错误表（kind 非 tool/workflow→400｜page<1→400｜install 不存在→404｜白名单非法→400（Q10 优先）+ assertInsideDir 纵深 400/403｜越权 unpublish→403｜缺失 principal→401）→ Task 3/5。
+- §4 注册（`store-registry.ts` 注册 `shared-assets-sqlite` + 路由挂载 + 启动扫描 + 前端 tab）→ 已注册并通过 persistence inventory census + Schema Tripwire（fingerprint 分类 `compatible`）。
+
+### 持久化基线落地补遗（本 spec 未预见、M3 验收时补齐）
+- `scripts/generate-persistence-schema-fingerprint.mjs` 新增 `sharedAssetsSchema()` runtime introspector。
+- `shared/persistence/store-registry.ts` 补 `register-bookkeeping-on-register` / `user-home-destruction-on-unregister` / `user-workflows-runtime` 三个 exemption（上游主干写操作注册），并为 `user-studio-registries` 补 `unregister.ts` siteRule。
+
+### 验证
+- `node scripts/scan-persistent-stores.mjs`：干净 inventory（62 stores / 793 sites）。
+- `npx vitest run tests/persistence-schema-tripwire.test.ts tests/persistence-store-registry.test.ts`：29 passed / 29。
+- `vitest.config.js` `testTimeout` 10s→30s（全量扫描用例单条约 9.7s~21.4s）。
+
+### 偏差
+- spec §2.4「缺失 principal → 403」以代码为准为 **401**（越权仍 403）。
+- localStorage 缓存、自动覆盖升级、ADR-12.5 注销转移触发链路、B 级市场归 out-of-scope（spec §6）。

@@ -2012,6 +2012,45 @@
       "exemption": null
     },
     {
+      "id": "shared-assets-sqlite",
+      "ownerModule": "server/sharing/store.ts",
+      "pathPattern": "system/shared-assets.db",
+      "pathPatterns": [
+        "system/shared-assets.db",
+        "system/shared-assets.db-wal",
+        "system/shared-assets.db-shm",
+        "system/shared/**"
+      ],
+      "pathExclusions": [],
+      "pathKind": "tree",
+      "format": "sqlite",
+      "schemaSource": {
+        "kind": "sqlite-runtime",
+        "module": "server/sharing/store.ts",
+        "contract": "SharingAssetStore runtime DDL and store-local PRAGMA user_version"
+      },
+      "schemaContract": {
+        "kind": "runtime-source",
+        "source": "server/sharing/store.ts",
+        "compatibility": "The named runtime reader is canonical; this inventory does not imply stricter validation than runtime currently performs."
+      },
+      "openEntry": [
+        "new SharingAssetStore"
+      ],
+      "migrationEntry": [],
+      "protocolModules": [],
+      "firstPossibleOpenPhase": "engine_construct",
+      "firstPossibleWritePhase": "engine_construct",
+      "epochPolicy": "epoch-managed",
+      "checkpointPolicy": "Included in a future epoch checkpoint unless the coordinator explicitly classifies it otherwise.",
+      "restorePolicy": "Restore only through the owning module after reader compatibility is established.",
+      "affectedByEpochMigration": true,
+      "bootstrapSafety": null,
+      "preCoordinatorReadProjection": null,
+      "identityContract": "asset id is the durable shared identity owned by ownerId; forkedFrom links lineage.",
+      "exemption": null
+    },
+    {
       "id": "signed-artifacts",
       "ownerModule": "shared/artifact-core/pointer-store.cjs",
       "pathPattern": "artifacts",
@@ -3401,6 +3440,24 @@
       "storeId": "local-user-auth",
       "exemptionId": null,
       "ordinal": 1
+    },
+    {
+      "sourceFile": "core/local-user-account.ts",
+      "kind": "secret-write",
+      "excerpt": "writeSecretJson(path.join(hanakoHome, LOCAL_USER_AUTH_FILE), auth)",
+      "reason": "Writes the local user authentication record.",
+      "storeId": "local-user-auth",
+      "exemptionId": null,
+      "ordinal": 2
+    },
+    {
+      "sourceFile": "core/local-user-account.ts",
+      "kind": "secret-write",
+      "excerpt": "writeSecretJson(path.join(hanakoHome, LOCAL_USER_AUTH_FILE), auth)",
+      "reason": "Writes the local user authentication record.",
+      "storeId": "local-user-auth",
+      "exemptionId": null,
+      "ordinal": 3
     },
     {
       "sourceFile": "core/local-user-account.ts",
@@ -5020,6 +5077,33 @@
       "reason": "Writes the studio mount registry.",
       "storeId": "studio-mount-registry",
       "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "core/user-script-runtime.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(dir, { recursive: true })",
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "storeId": null,
+      "exemptionId": "user-tools-runtime",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "core/user-script-runtime.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(dir, \"manifest.json\"), JSON.stringify(def, null, 2))",
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "storeId": null,
+      "exemptionId": "user-tools-runtime",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "core/user-script-runtime.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(dir, \"src\"), def.src)",
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "storeId": null,
+      "exemptionId": "user-tools-runtime",
       "ordinal": 0
     },
     {
@@ -8092,6 +8176,105 @@
       "ordinal": 0
     },
     {
+      "sourceFile": "server/auth/register.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(path.join(baseDir, userHomePath(userId)), { recursive: true })",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "storeId": null,
+      "exemptionId": "register-bookkeeping-on-register",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/register.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(sysDir, { recursive: true })",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "storeId": null,
+      "exemptionId": "register-bookkeeping-on-register",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/register.ts",
+      "kind": "remove-path",
+      "excerpt": "fs.unlinkSync(lockPath)",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "storeId": null,
+      "exemptionId": "register-bookkeeping-on-register",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/register.ts",
+      "kind": "rename",
+      "excerpt": "fs.renameSync(tmp, p)",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "storeId": null,
+      "exemptionId": "register-bookkeeping-on-register",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/register.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(lockPath, String(process.pid), { flag: \"wx\" })",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "storeId": null,
+      "exemptionId": "register-bookkeeping-on-register",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/register.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(tmp, JSON.stringify(doc, null, 2))",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "storeId": null,
+      "exemptionId": "register-bookkeeping-on-register",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/unregister.ts",
+      "kind": "remove-path",
+      "excerpt": "fs.rmSync(userHome, { recursive: true, force: true })",
+      "reason": "Hard-delete removes the per-user business home directory whose owned stores are being destroyed with the account; no independent store identity is formed or preserved by the rmSync.",
+      "storeId": null,
+      "exemptionId": "user-home-destruction-on-unregister",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/unregister.ts",
+      "kind": "rename",
+      "excerpt": "fs.renameSync(tmp, p)",
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "storeId": "user-studio-registries",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/unregister.ts",
+      "kind": "rename",
+      "excerpt": "fs.renameSync(tmp, p)",
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "storeId": "user-studio-registries",
+      "exemptionId": null,
+      "ordinal": 1
+    },
+    {
+      "sourceFile": "server/auth/unregister.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(tmp, JSON.stringify(doc, null, 2))",
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "storeId": "user-studio-registries",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/auth/unregister.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(tmp, JSON.stringify(doc, null, 2))",
+      "reason": "Soft or hard deletes the local user record atomically in users.json.",
+      "storeId": "user-studio-registries",
+      "exemptionId": null,
+      "ordinal": 1
+    },
+    {
       "sourceFile": "server/index.ts",
       "kind": "append-file",
       "excerpt": "fs.promises.appendFile(_bwsLogPath, chunk)",
@@ -8647,6 +8830,114 @@
       "reason": "resolveUploadTarget sends the same syntactic write sites to registered session-files storage when sessionPath is present or to the registered legacy uploads cache otherwise; flow-sensitive site attribution is required to distinguish them.",
       "storeId": null,
       "exemptionId": "conditional-upload-target",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/routes/user-workflows.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(dir, { recursive: true })",
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "storeId": null,
+      "exemptionId": "user-workflows-runtime",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/routes/user-workflows.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(dir, \"graph.json\"), JSON.stringify(graph))",
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "storeId": null,
+      "exemptionId": "user-workflows-runtime",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/routes/user-workflows.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(dir, \"script.js\"), js)",
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "storeId": null,
+      "exemptionId": "user-workflows-runtime",
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/index.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(dir, { recursive: true })",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/index.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(toolDir, { recursive: true })",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/index.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(wfDir, { recursive: true })",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/index.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(dir, snapshotName), input.sourceContent)",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/index.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(toolDir, \"manifest.json\"), JSON.stringify(def, null, 2))",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/index.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(toolDir, \"src\"), src)",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/index.ts",
+      "kind": "write-file",
+      "excerpt": "fs.writeFileSync(path.join(wfDir, \"graph.json\"), graph)",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/store.ts",
+      "kind": "database-open",
+      "excerpt": "new Database(dbPath)",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
+      "ordinal": 0
+    },
+    {
+      "sourceFile": "server/sharing/store.ts",
+      "kind": "mkdir",
+      "excerpt": "fs.mkdirSync(path.dirname(dbPath), { recursive: true })",
+      "reason": "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots.",
+      "storeId": "shared-assets-sqlite",
+      "exemptionId": null,
       "ordinal": 0
     },
     {
@@ -9855,6 +10146,19 @@
       "linePattern": "(?:path[.]dirname\\(filePath\\)|writeSecretFileSync\\(filePath)"
     },
     {
+      "id": "register-bookkeeping-on-register",
+      "ownerModule": "server/auth/register.ts",
+      "sourceFile": "server/auth/register.ts",
+      "reason": "Registration performs account bookkeeping only: directory creation for the system store and per-user business home (owned stores attach on first write), plus a process-local registration lock file (writeFileSync/unlinkSync) that is not durable state. Concrete users.json / local-user-auth.json writes are owned by their registered stores.",
+      "expiresOn": "2026-12-31",
+      "kinds": [
+        "mkdir",
+        "write-file",
+        "rename",
+        "remove-path"
+      ]
+    },
+    {
       "id": "sandbox-command-output",
       "ownerModule": "lib/exec-command/runner.ts",
       "sourceFile": "lib/exec-command/runner.ts",
@@ -9964,6 +10268,41 @@
         "atomic-write",
         "secret-write",
         "persistent-store-constructor"
+      ]
+    },
+    {
+      "id": "user-home-destruction-on-unregister",
+      "ownerModule": "server/auth/unregister.ts",
+      "sourceFile": "server/auth/unregister.ts",
+      "reason": "Hard-delete removes the per-user business home directory whose owned stores are being destroyed with the account; no independent store identity is formed or preserved by the rmSync.",
+      "expiresOn": "2026-12-31",
+      "kinds": [
+        "remove-path"
+      ]
+    },
+    {
+      "id": "user-tools-runtime",
+      "ownerModule": "core/user-script-runtime.ts",
+      "sourceFile": "core/user-script-runtime.ts",
+      "reason": "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+      "expiresOn": "2026-12-31",
+      "kinds": [
+        "mkdir",
+        "write-file",
+        "atomic-write",
+        "rename",
+        "remove-path"
+      ]
+    },
+    {
+      "id": "user-workflows-runtime",
+      "ownerModule": "server/routes/user-workflows.ts",
+      "sourceFile": "server/routes/user-workflows.ts",
+      "reason": "Per-user compiled workflow scripts and declarative graphs under users/<userId>/workflows are regenerable from the server-side workflow compiler and the publish source; owned by the workflow route and read back by workflow-tool.",
+      "expiresOn": "2026-12-31",
+      "kinds": [
+        "mkdir",
+        "write-file"
       ]
     },
     {
