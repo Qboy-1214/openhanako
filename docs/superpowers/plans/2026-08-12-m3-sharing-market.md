@@ -577,9 +577,9 @@ Run: `npx vitest run tests/workflow/graph-persist.test.ts`
 Expected: FAIL — 仅 script.js 落盘，graph.json 不存在
 
 - [ ] **Step 3: Modify `POST /api/workflows` handler**
-在 `compileWorkflow(graph)` → `fs.writeFile(script.js)` 之后追加：
+在 `compileWorkflow(graph)` → `fs.writeFileSync(script.js)` 之后追加（保持同步风格，与该路由现有 `import * as fs from "fs"` + `fs.writeFileSync` 一致，不引入 `fs/promises`）：
 ```ts
-await fs.writeFile(path.join(dir, "graph.json"), JSON.stringify(graph, null, 2)); // Q2+Q8=A：落原始请求 JSON
+fs.writeFileSync(path.join(dir, "graph.json"), JSON.stringify(graph, null, 2)); // Q2+Q8=A：落原始请求 JSON（同步，与 script.js 同风格）
 ```
 不改变 `script.js` 读回路径、不污染 `compileWorkflow` 纯函数。
 
@@ -677,7 +677,7 @@ git commit -m "feat(m3): install fork + launch scan catalog + forced sandbox for
 > spec §2.6 要点：浏览页 `/market`、详情页 `/market/:id`、我的页 `/market/mine`、发布入口嵌入私有资产列表、保留 `SharingTab.tsx` 重写为 Web 化入口跳转 `/market`、`marketApi` 对应 §2.4 端点、README 渲染、决策5「作者已更新 ↻」徽标。
 
 **Files:**
-- Create: `desktop/src/shared/api/marketApi.ts`
+- Create: `desktop/src/shared/api/marketApi.ts`（**执行时一并创建 `shared/api/` 目录**——当前 `desktop/src/shared/` 下无 `api/` 子目录，现有 API 多在 `react/settings/api.ts` 或 `react/hooks/use-hana-fetch.ts`；新建 `shared/api` 是架构演进，集中跨路由的 market API client）
 - Create: `desktop/src/react/market/{MarketPage,AssetDetailPage,PublishForm,MyAssetsPage,PublishFromPrivateList}.tsx`
 - Modify: `desktop/src/react/settings/tabs/SharingTab.tsx`（重写为入口，跳转 `/market`）
 - Modify: `desktop/src/react/router.tsx`（注册 `/market`、`/market/:id`、`/market/mine`）
