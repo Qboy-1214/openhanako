@@ -50,6 +50,8 @@ export interface CompositionContext {
    * `userEngineMiddleware` / `bindEngineToWs` 按 userId 取引擎。
    */
   engineLifecycle?: any;
+  /** M3 Sharing Market 进程级单例（系统级共享资产 store + baseDir）。 */
+  sharingMarket?: any;
 }
 
 export interface CompositionRoot {

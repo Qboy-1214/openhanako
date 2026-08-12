@@ -11,6 +11,7 @@ import { ChannelHeader } from '../channels/ChannelHeader';
 import { MainContent } from '../../MainContent';
 import { ChatPage } from './ChatPage';
 import { WorkspaceCompanionRail } from './WorkspaceCompanionRail';
+import { MarketPage } from './MarketPage';
 
 const tr = (key: string, vars?: Record<string, string | number>) => window.t?.(key, vars) ?? key;
 
@@ -136,6 +137,7 @@ export function AppPages() {
       <MainContent>
         {currentTab === 'chat' && <ChatPage />}
         {currentTab === 'channels' && <ChannelPage />}
+        {currentTab === 'market' && <MarketPage />}
         {isPluginTab && <PluginPage pluginId={currentTab.slice(7)} />}
         <ActivityPanel />
         <AutomationPanel />

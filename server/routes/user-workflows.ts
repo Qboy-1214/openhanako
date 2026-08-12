@@ -30,6 +30,8 @@ export function createWorkflowRoute(getEngine: (c: any) => any) {
     const dir = path.join(engine.hanakoHome, "workflows", id);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "script.js"), js);
+    // M3 (Task 4)：同时保存原始图，供 publish 读取（不跨端重传）
+    fs.writeFileSync(path.join(dir, "graph.json"), JSON.stringify(graph));
     return c.json({ id, status: "compiled" });
   });
 

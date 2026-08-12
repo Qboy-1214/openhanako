@@ -50,7 +50,7 @@ export function switchTab(tab: TabType) {
 
 function buildTabList(pluginPages: PluginPageInfo[], tabOrder: string[]): TabType[] {
   const pluginTabs: TabType[] = pluginPages.map(p => `plugin:${p.pluginId}` as TabType);
-  const draggable: TabType[] = ['channels' as TabType, ...pluginTabs];
+  const draggable: TabType[] = ['channels' as TabType, 'market' as TabType, ...pluginTabs];
 
   // Order by user preference, with unordered at end
   const ordered: TabType[] = [];
@@ -67,6 +67,7 @@ function buildTabList(pluginPages: PluginPageInfo[], tabOrder: string[]): TabTyp
 function getTabLabel(tab: TabType, pluginPages: PluginPageInfo[], locale: string): string {
   if (tab === 'chat') return t('channel.chatTab');
   if (tab === 'channels') return t('channel.tab');
+  if (tab === 'market') return t('channel.marketTab');
   if (typeof tab === 'string' && tab.startsWith('plugin:')) {
     const pluginId = tab.slice(7);
     const page = pluginPages.find(p => p.pluginId === pluginId);

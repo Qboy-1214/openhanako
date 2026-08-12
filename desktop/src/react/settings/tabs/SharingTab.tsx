@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { t } from '../helpers';
+import { useStore } from '../../stores';
 import styles from '../Settings.module.css';
 import { SettingsSection } from '../components/SettingsSection';
 import { SettingsRow } from '../components/SettingsRow';
@@ -37,6 +38,7 @@ const PREVIEW_IMAGES: Record<string, string> = {
 };
 
 export function SharingTab() {
+  const setCurrentTab = useStore((s) => s.setCurrentTab);
   const [screenshotColor, setScreenshotColor] = useState(
     () => localStorage.getItem('hana-screenshot-color') || 'light'
   );
@@ -155,6 +157,23 @@ export function SharingTab() {
               fieldWidth="wide"
               unit={t('settings.screenshot.segmentLimitUnit')}
             />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title={t('settings.screenshot.marketEntry')}>
+        <SettingsRow
+          label={t('settings.screenshot.marketEntryLabel')}
+          hint={t('settings.screenshot.marketEntryHint')}
+          control={
+            <button
+              className={styles['ss-layout-card']}
+              style={{ cursor: 'pointer', textAlign: 'left' }}
+              onClick={() => setCurrentTab('market')}
+            >
+              <div className={styles['ss-layout-title']}>{t('settings.screenshot.openMarket')}</div>
+              <div className={styles['ss-layout-desc']}>{t('settings.screenshot.marketEntryHint')}</div>
+            </button>
           }
         />
       </SettingsSection>

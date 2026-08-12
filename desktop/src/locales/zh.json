@@ -46,6 +46,7 @@
   "channel": {
     "tab": "频道",
     "chatTab": "聊天",
+    "marketTab": "市场",
     "moreTabs": "更多标签",
     "empty": "还没有频道 ✿",
     "dmLabel": "私聊",
@@ -2267,7 +2268,11 @@
       "segmentTitle": "自动分段",
       "segmentLimitLabel": "单页字数上限",
       "segmentLimitHint": "超过这个可见字数后会在完整轮次边界切到下一张截图；默认 10000 字。",
-      "segmentLimitUnit": "字"
+      "segmentLimitUnit": "字",
+      "marketEntry": "分享市场",
+      "marketEntryLabel": "打开分享市场",
+      "marketEntryHint": "发布、发现并安装社区共享的工具与工作流。",
+      "openMarket": "前往市场"
     },
     "bridge": {
       "agent": "Agent",

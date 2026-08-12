@@ -22,6 +22,7 @@ import { createDeskRoute } from "../routes/desk.ts";
 import { createUserToolsRoute } from "../routes/user-tools.ts";
 import { createWorkflowRoute } from "../routes/user-workflows.ts";
 import { createDiaryRoute } from "../routes/diary.ts";
+import { createSharingRoute } from "../routes/sharing.ts";
 import { builtinImageGenAdapters } from "../../core/media-adapters/builtin-adapters.ts";
 
 export function registerClosedRoutes(app: Hono, ctx: CompositionContext): void {
@@ -35,6 +36,10 @@ export function registerClosedRoutes(app: Hono, ctx: CompositionContext): void {
   app.route("/api", createUserToolsRoute(getUserEngine));
   app.route("/api", createWorkflowRoute(getUserEngine));
   app.route("/api", createDiaryRoute(engine));
+  // M3 Sharing Market：market 为进程级系统单例；引擎按用户解析
+  if (ctx.sharingMarket) {
+    app.route("/api", createSharingRoute(() => ctx.sharingMarket, getUserEngine));
+  }
 }
 
 export const builtinMediaAdapters = builtinImageGenAdapters;

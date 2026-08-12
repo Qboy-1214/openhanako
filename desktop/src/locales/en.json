@@ -46,6 +46,7 @@
   "channel": {
     "tab": "Channels",
     "chatTab": "Chat",
+    "marketTab": "Market",
     "moreTabs": "More tabs",
     "empty": "No channels yet ✿",
     "dmLabel": "Messages",
@@ -2267,7 +2268,11 @@
       "segmentTitle": "Auto Segmentation",
       "segmentLimitLabel": "Characters per page",
       "segmentLimitHint": "When visible text exceeds this limit, the next screenshot starts at a full conversation-round boundary. Default is 10000 characters.",
-      "segmentLimitUnit": "chars"
+      "segmentLimitUnit": "chars",
+      "marketEntry": "Sharing Market",
+      "marketEntryLabel": "Open the Sharing Market",
+      "marketEntryHint": "Publish, discover and install tools and workflows shared by the community.",
+      "openMarket": "Go to Market"
     },
     "bridge": {
       "agent": "Agent",

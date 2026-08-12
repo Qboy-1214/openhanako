@@ -590,6 +590,26 @@ export const PERSISTENT_STORES: readonly StoreDescriptor[] = Object.freeze([
     ],
   }),
   defineStore({
+    id: "shared-assets-sqlite",
+    ownerModule: "server/sharing/store.ts",
+    pathPatterns: [
+      "system/shared-assets.db",
+      "system/shared-assets.db-wal",
+      "system/shared-assets.db-shm",
+      "system/shared/**",
+    ],
+    pathKind: "tree",
+    format: "sqlite",
+    schemaSource: { kind: "sqlite-runtime", module: "server/sharing/store.ts", contract: "SharingAssetStore runtime DDL and store-local PRAGMA user_version" },
+    openEntry: ["new SharingAssetStore"],
+    firstPossibleOpenPhase: "engine_construct",
+    firstPossibleWritePhase: "engine_construct",
+    identityContract: "asset id is the durable shared identity owned by ownerId; forkedFrom links lineage.",
+    siteRules: [
+      ...rules(["server/sharing/store.ts", "server/sharing/index.ts"], "Opens, migrates, or manages files for the system-level shared-assets.db and shared asset snapshots."),
+    ],
+  }),
+  defineStore({
     id: "session-jsonl",
     ownerModule: "core/session-coordinator.ts",
     pathPatterns: [
@@ -1367,6 +1387,14 @@ function exemption(
 }
 
 export const PERSISTENCE_EXEMPTIONS: readonly PersistenceExemption[] = Object.freeze([
+  exemption(
+    "user-tools-runtime",
+    "core/user-script-runtime.ts",
+    "core/user-script-runtime.ts",
+    "Per-user tool scripts under users/<userId>/tools are regenerable from source; owned by engine registerUserScript/persistUserScript and scanned by scanLocalInstalls. No independent store identity.",
+    "2026-12-31",
+    ["mkdir", "write-file", "atomic-write", "rename", "remove-path"],
+  ),
   exemption(
     "data-epoch-durable-json-primitive",
     "shared/data-epoch.cjs",

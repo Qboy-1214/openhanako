@@ -21,6 +21,10 @@ export interface UserScriptDef {
   src: string;
   schema?: object;
   paramsSummary?: string;
+  /** M3：标记来源资产 id（跨用户 fork 链）。 */
+  forkedFrom?: string;
+  /** M3：强制该工具经强沙箱执行（从 Sharing Market 安装所得）。 */
+  sandboxed?: boolean;
 }
 
 export interface ExecuteUserScriptOptions {
@@ -48,6 +52,31 @@ export function readUserScript(userId: string, id: string, hanakoHome: string): 
   } catch {
     return null;
   }
+}
+
+/**
+ * M3 (Task 5)：扫描 per-user 根 tools/ 下所有已安装资产（localId 形如
+ * "<kind>:<sourceId>@<ownerId>"），返回其 UserScriptDef 列表。引擎启动时
+ * 调用以把 Market 安装的工具重新热注册（走强沙箱）。
+ */
+export function scanLocalInstalls(userHome: string): UserScriptDef[] {
+  const toolsDir = path.join(userHome, "tools");
+  if (!fs.existsSync(toolsDir)) return [];
+  const out: UserScriptDef[] = [];
+  for (const name of fs.readdirSync(toolsDir)) {
+    const manifestPath = path.join(toolsDir, name, "manifest.json");
+    if (!fs.existsSync(manifestPath)) continue;
+    try {
+      const def = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as UserScriptDef;
+      if (!def.sandboxed) continue; // 仅重新注册从 Sharing Market 安装的工具
+      const srcPath = path.join(toolsDir, name, "src");
+      def.src = fs.existsSync(srcPath) ? fs.readFileSync(srcPath, "utf8") : "";
+      out.push(def);
+    } catch {
+      // 跳过损坏项
+    }
+  }
+  return out;
 }
 
 async function runInVm(scriptJs: string, args: Record<string, unknown>, ctx: unknown, timeoutMs?: number): Promise<string> {
@@ -85,6 +114,10 @@ export async function executeUserScript(
   }
   // py / sh：需 server 层注入的沙盒 exec
   if (!opts.execBackend) {
+    if (def.sandboxed) {
+      // M3 强沙箱：从 Market 安装的工具绝不允许在无沙箱下执行
+      throw new Error(`sandboxed tool requires an isolated exec backend (bwrap/docker); execution denied`);
+    }
     return `runtime '${def.runtime}' 需要调用方注入 execBackend（bwrap/docker 沙盒）`;
   }
   const command = def.runtime === "py" ? `python3 -c ${JSON.stringify(def.src)}` : def.src;

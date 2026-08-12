@@ -145,7 +145,7 @@ import { createToolCatalog } from "./tool-catalog.ts";
 import { hashCacheContractValue } from "../lib/llm/cache-prefix-contract.ts";
 import { resolveReferenceBudgetTokens } from "./session-reminders.ts";
 import { createBridgeTools, registerBridgeCapabilityDelegates } from "./tool-catalog-bridge.ts";
-import { readUserScript, executeUserScript, persistUserScript, type UserScriptDef } from "./user-script-runtime.ts";
+import { readUserScript, executeUserScript, persistUserScript, scanLocalInstalls, type UserScriptDef } from "./user-script-runtime.ts";
 import { summarizeToolParameters } from "./mcp/manager.ts";
 
 /** Matches the MCP config default; used when no manager config is available. */
@@ -2363,6 +2363,19 @@ export class HanaEngine {
 
   async init(log: any = () => {}) {
     const startupTimer = Date.now();
+
+    // M3 (Task 5)：per-user 引擎启动时扫描 Market 安装的工具并重注册（走强沙箱）。
+    if (this.userId) {
+      try {
+        for (const def of scanLocalInstalls(this.hanakoHome)) {
+          const existing = this._userScripts.findIndex((s) => s.name === def.name);
+          if (existing >= 0) this._userScripts[existing] = def;
+          else this._userScripts.push(def);
+        }
+      } catch {
+        // 扫描失败不影响引擎启动
+      }
+    }
 
     // 0. Config scope 迁移（全局字段从 agent config → preferences）
     const configScopeStep = runBestEffortStartupMigrationStep("config-scope", () => {

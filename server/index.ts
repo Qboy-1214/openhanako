@@ -976,6 +976,12 @@ export async function startServer(root: CompositionRoot = {}): Promise<void> {
     builtinMediaAdapters: root.builtinMediaAdapters,
   });
 
+  // M3 Sharing Market：进程级系统单例。系统级 store 根 = baseDir/system。
+  const { SharingAssetStore } = await import("./sharing/store.ts");
+  const { SharingMarket } = await import("./sharing/index.ts");
+  const sharingStore = new SharingAssetStore(path.join(baseDir, "system", "shared-assets.db"));
+  const sharingMarket = new SharingMarket(sharingStore, baseDir);
+
   const ctx: CompositionContext = {
     engine,
     hub,
@@ -987,6 +993,7 @@ export async function startServer(root: CompositionRoot = {}): Promise<void> {
     confirmStore,
     appVersion,
     engineLifecycle,
+    sharingMarket,
   };
   // M1 (F1)：每请求按 principal.userId acquire 每用户引擎，挂到 c.get('engine')。
   // 高敏感路由经 getUserEngine(c) 取它；系统/只读路由回退全局兜底引擎。
