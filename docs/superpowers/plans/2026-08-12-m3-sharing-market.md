@@ -20,7 +20,7 @@
 | §2.4 路由契约（6 端点：publish/discover/assets/:id/install/delete/mine + **Q10 localAssetId 白名单 + Q7 forkedFrom 写入 + Q11 existingAssetId + DiscoverItem 形状**） | Task 3 |
 | §2.5 分享管线（发布/安装/卸载/注销转移，**含 Q2 graph.json / Q7 forkedFrom / Q9 sandboxed 标记**） | Task 4 / Task 5 |
 | §2.6 前端四页（`/market` 路由 + MarketPage/AssetDetailPage/PublishForm/MyAssetsPage/PublishFromPrivateList + 发布入口嵌入私有资产列表 + 决策5 update 徽标 + README 渲染 + SharingTab 重写入口） | Task 6 |
-| §3 错误处理（**含 Q10 400 + assertInsideDir 403**） | Task 3 / Task 4 |
+| §3 错误处理（**完整错误表**：kind 非 tool/workflow → 400｜page<1 → 400｜install 资产不存在 → 404｜localAssetId 白名单非法 → 400（Q10 优先）+ assertInsideDir 纵深 400/403｜越权 unpublish → 403｜缺失 principal → 401） | Task 3 / Task 4 |
 | §4 注册清单（SystemDB 注册 + 路由挂载 + EngineLifecycle 启动扫描 + Agent 注入 + 前端 tab） | Task 1 / Task 3 / Task 5 / Task 6 |
 | §5 测试分层（集成 + 引擎单元 + 前端组件 + 路径守卫） | Task 7（贯穿各 Task 测试）+ Task 8 |
 | §6 待办（B 级复用 / 启动扫描时机 Q4 / 注销转移 ADR-12.5 / localStorage 缓存 / 跨里程碑） | Task 5 / Task 9 |
@@ -187,56 +187,57 @@ describe("M3 SharingMarket", () => {
   it("publish generates randomUUID assetId, version=1 (Q11=A)", async () => {
     const m = makeMarket();
     const meta = await m.publish("u_a", "/tmp/src-a", "tool", "summarizer");
-    expect(meta.asset_id).toMatch(/^[0-9a-f-]{36}$/); // randomUUID
+    expect(meta.assetId).toMatch(/^[0-9a-f-]{36}$/); // randomUUID
     expect(meta.version).toBe(1);
   });
   it("publish with existingAssetId (same owner) bumps version (Q11=A)", async () => {
     const m = makeMarket();
     const a1 = await m.publish("u_a", "/tmp/src-a", "tool", "summarizer");
-    const a2 = await m.publish("u_a", "/tmp/src-a2", "tool", "summarizer", undefined, a1.asset_id);
-    expect(a2.asset_id).toBe(a1.asset_id);
+    const a2 = await m.publish("u_a", "/tmp/src-a2", "tool", "summarizer", undefined, a1.assetId);
+    expect(a2.assetId).toBe(a1.assetId);
     expect(a2.version).toBe(2);
   });
   it("publish without existingAssetId is a new snapshot row (no PK conflict)", async () => {
     const m = makeMarket();
     const a1 = await m.publish("u_a", "/tmp/src-a", "tool", "summarizer");
     const a2 = await m.publish("u_a", "/tmp/src-a", "tool", "summarizer"); // 重发但不传旧 ID
-    expect(a1.asset_id).not.toBe(a2.asset_id);
+    expect(a1.assetId).not.toBe(a2.assetId);
   });
-  it("discover excludes owner and orders by install_count DESC", async () => {
+  it("discover excludes owner and orders by installCount DESC", async () => {
     const m = makeMarket();
     await m.publish("u_a", "/s", "tool", "t1");
     const b = await m.publish("u_b", "/s", "tool", "t2");
-    await m.install(b.asset_id, "u_a"); // b 安装数=1
+    await m.install(b.assetId, "u_a"); // b 安装数=1
     const list = await m.discover({ excludeOwnerId: "u_a" });
-    expect(list[0].asset_id).toBe(b.asset_id); // 安装多的排前
+    expect(list[0].assetId).toBe(b.assetId); // 安装多的排前
   });
-  it("install increments install_count, returns localAssetId+version", async () => {
+  it("install increments installCount, returns localAssetId+version", async () => {
     const m = makeMarket();
     const a = await m.publish("u_a", "/s", "tool", "t");
-    const r = await m.install(a.asset_id, "u_b");
+    const r = await m.install(a.assetId, "u_b");
     expect(r.version).toBe(1);
     expect(typeof r.localAssetId).toBe("string");
-    expect(m.getAsset(a.asset_id)!.install_count).toBe(1);
+    expect(m.getAsset(a.assetId)!.installCount).toBe(1);
   });
   it("unpublish only by owner (403 for non-owner)", async () => {
     const m = makeMarket();
     const a = await m.publish("u_a", "/s", "tool", "t");
-    expect(() => m.unpublish(a.asset_id, "u_b")).toThrow(/owner/);
-    m.unpublish(a.asset_id, "u_a");
-    expect(m.getAsset(a.asset_id)).toBeNull();
+    expect(() => m.unpublish(a.assetId, "u_b")).toThrow(/owner/);
+    m.unpublish(a.assetId, "u_a");
+    expect(m.getAsset(a.assetId)).toBeNull();
   });
   it("transferOnDelete moves assets to __system__ (ADR-12.5)", async () => {
     const m = makeMarket();
     const a = await m.publish("u_a", "/s", "tool", "t");
     m.transferOnDelete("u_a");
-    const row = m.getAsset(a.asset_id)!;
-    expect(row.owner_id).toBe("__system__");
-    expect(row.system_owned).toBe(1);
+    const row = m.getAsset(a.assetId)!;
+    expect(row.ownerId).toBe("__system__");
+    expect(row.systemOwned).toBe(1);
   });
   it("listMine.installed reads catalog forkedFrom entries (Q6=A placeholder; real catalog wiring in Task 5)", async () => {
     // 本 Task 先用内存 catalog stub；Q6 的"扫 tools/+workflows/ 过滤 forkedFrom"由 Task 5 引擎扫描回填
-    const m = makeMarket({ catalog: new Map([["local-x", { forkedFrom: "asset-1", kind: "tool", name: "t", version: 1 }]]) });
+    // 构造签名统一为 makeMarket({ catalogProvider })：catalogProvider 返回 LocalInstall[]（Task 5 由引擎扫描提供）
+    const m = makeMarket({ catalogProvider: () => [{ localAssetId: "local-x", assetId: "asset-1", forkedFrom: "asset-1", kind: "tool", name: "t", version: 1 }] });
     const mine = await m.listMine("u_a");
     expect(mine.installed.find(i => i.localAssetId === "local-x")!.forkedFrom).toBe("asset-1");
   });
@@ -253,6 +254,8 @@ Expected: FAIL — `SharingMarket` 未实现
 export interface SharedAssetMeta {
   assetId: string; ownerId: string; ownerHandle: string;
   kind: "tool" | "workflow"; name: string; version: number;
+  // description/readme 不存于 shared_assets 表（§2.1 无该列），由 getAsset/getAssetReadme 读 meta.json 补充；
+  // rowToMeta 不填这两项，discover 列表项的 description 可选留空。
   description?: string; readme?: string;
   originRef?: string; installCount: number;
   createdAt: number; updatedAt: number; systemOwned: boolean;
@@ -286,7 +289,7 @@ export function rowToMeta(row: any, accounts?: AccountLookup): SharedAssetMeta {
 - `getAsset` / `getAssetContentPath(assetId) => sharedRoot/<assetId>/source`；`getAsset` 返回经 `rowToMeta` 含 `ownerHandle`。
 - `install(assetId, installerId)`：`install_count+1`，返回 `{ localAssetId: crypto.randomUUID(), version }`（localAssetId 由安装侧 Task 5 落盘时使用）。
 - `unpublish(assetId, requesterId)`：`if requesterId !== owner && !isSystemAdmin throw 403`；删索引 + `fs.rm` 源目录。
-- `listMine(userId)`：`published = SELECT * WHERE owner_id=userId` 经 `rowToMeta`；`installed` 来自注入的 catalog（Task 5 实装，本 Task 用 stub Map 接口 `catalog: Map<localAssetId, LocalInstallLike>`）。
+- `listMine(userId)`：`published = SELECT * WHERE owner_id=userId` 经 `rowToMeta`；`installed` 来自注入的 `catalogProvider`（`catalogProvider(): LocalInstall[]`，Task 5 由引擎启动扫描提供；本 Task 测试用 stub 函数返回 `LocalInstall[]`）。构造签名统一为 `makeMarket({ accounts, catalogProvider })`。**Task 5 衔接**：`SharingMarket` 实际构造为 `new SharingMarket(db, sharedRoot, accounts, catalogProvider)`，`catalogProvider` 由引擎启动扫描结果闭包提供（见 Task 5 Step 5）。二级 fork 发布（`u_b` 以已装 `localAssetId` 副本为源再 publish）的 `forkedFrom` 写入：以该副本 manifest 中的 `forkedFrom`（即原始 `assetId`）为链尾回溯，落盘新行 `origin_ref` 指向原始 `assetId`，不重复造链。
 - `countDiscover({kind?,q?,excludeOwnerId?})`：与 `discover` 同过滤条件返回 `COUNT(*)`（供 discover 端点返回 `{items,total}`）。
 - `getAssetReadme(assetId)`：读 `sharedRoot/<assetId>/meta.json` 的 `readme` 字段（§2.4 assets/:id 响应）。
 - `transferOnDelete(ownerId)`：`UPDATE SET owner_id='__system__', system_owned=1 WHERE owner_id=?`。
@@ -754,7 +757,7 @@ Run: `npx vitest run`
 Expected: 全部 PASS（含 Task 1–6 新增 + 既有 M1/M2 套件无回归）
 
 - [ ] **Step 3: E2E 手测（两用户分享闭环）**
-启动服务，user A 发布一个 tool → user B 在 AssetsPage 发现并安装 → B 的引擎启动扫描把 fork 副本注入 catalog（sandboxed）→ B 执行该 tool 验证进强沙箱 → A 在 MyAssetsPage 看到 published、B 看到 installed。验证 Q1/Q4/Q6/Q9 端到端。
+启动服务，user A 发布一个 tool → user B 在 `/market`（`MarketPage`）发现并安装 → B 的引擎启动扫描把 fork 副本注入 catalog（sandboxed）→ B 执行该 tool 验证进强沙箱 → A 在 `/market/mine`（`MyAssetsPage`）看到 published、B 看到 installed。验证 Q1/Q4/Q6/Q9 端到端。
 
 - [ ] **Step 4: Final commit**
 ```bash
