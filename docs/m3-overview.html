@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>openhanako M3 规划全景</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#2a2f3a; --ink:#e6e9ef;
+    --muted:#9aa4b2; --a:#5b8def; --b:#37b98a; --c:#e08a3c; --danger:#e05c5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.5}
+  header{padding:24px 32px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:22px} h1 small{color:var(--muted);font-weight:400;font-size:14px}
+  main{padding:24px 32px;max-width:1180px;margin:0 auto}
+  section{margin-bottom:36px}
+  h2{font-size:16px;border-left:3px solid var(--a);padding-left:10px;margin:0 0 16px}
+  .grid{display:grid;gap:16px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h3{margin:0 0 8px;font-size:15px}
+  .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;margin-right:6px}
+  .t-a{background:rgba(91,141,239,.15);color:var(--a)}
+  .t-b{background:rgba(55,185,138,.15);color:var(--b)}
+  .t-c{background:rgba(224,138,60,.15);color:var(--c)}
+  .t-new{background:rgba(224,92,92,.15);color:var(--danger)}
+  .t-old{background:rgba(154,164,178,.15);color:var(--muted)}
+  ul{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
+  li{margin:3px 0}
+  .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13px}
+  .arrow{color:var(--muted)}
+  .legend{font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .note{background:rgba(224,138,60,.08);border:1px solid rgba(224,138,60,.3);
+    border-radius:10px;padding:12px 16px;font-size:13px;color:#f0c08a}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600}
+  code{background:#0c0e12;padding:1px 6px;border-radius:5px;font-size:12px;color:#cdd6e6}
+</style>
+</head>
+<body>
+<header>
+  <h1>openhanako · M3 内置/分享三级 <small>fork 私有 + Sharing Market（ADR-8 + ADR-16）</small></h1>
+</header>
+<main>
+
+<section>
+  <h2>一、三级关系（ADR-8）</h2>
+  <div class="grid g3">
+    <div class="card">
+      <h3><span class="tag t-a">A 全局只读</span></h3>
+      <div>系统内置工具 / 技能 / Agent</div>
+      <ul>
+        <li>全实例共享，用户不可改 origin</li>
+        <li>来源：系统内置市场（OH-Plugins）</li>
+        <li>对应现有 <code>PluginMarketplace</code> 远程源</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag t-b">B fork 私有</span></h3>
+      <div>复制为我的副本后改</div>
+      <ul>
+        <li>系统保留 origin，副本存 UserHome</li>
+        <li>用户可在自己引擎内自由改</li>
+        <li>对应 <code>user_assets</code> 私有层</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag t-c">C 用户间分享</span></h3>
+      <div>发布到 Sharing Market</div>
+      <ul>
+        <li>同实例全员、免审核（靠沙箱兜底）</li>
+        <li>SystemDB <code>shared_assets</code> 索引</li>
+        <li>他人安装 = 一份私有 fork 副本</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>二、分享数据流（发布 → 发现 → 安装即 fork）</h2>
+  <div class="flow">
+    <div class="box">用户私有资产<br><small>users/&lt;userId&gt;/tools|workflows</small></div>
+    <span class="arrow">── publish ──▶</span>
+    <div class="box">shared_assets 索引<br><small>system/system.sqlite</small></div>
+    <span class="arrow">── discover ──▶</span>
+    <div class="box">市场浏览列表<br><small>GET /api/sharing/discover</small></div>
+    <span class="arrow">── install ──▶</span>
+    <div class="box">调用者 UserHome<br><small>fork 副本 + forked_from</small></div>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--a)"></i>发布：私有资产 → shared_assets（insert）</span>
+    <span><i class="dot" style="background:var(--b)"></i>安装：shared_assets 指向内容 → 调用者 user_assets（fork）</span>
+    <span><i class="dot" style="background:var(--c)"></i>原作者更新不自动覆盖（防供应链投毒）</span>
+  </div>
+</section>
+
+<section>
+  <h2>三、M3 待建 / 已有 文件地图</h2>
+  <table>
+    <thead><tr><th>组件</th><th>路径</th><th>状态</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>分享市场核心</td><td><code>server/sharing/index.ts</code></td><td><span class="tag t-new">待建</span></td><td>SharingMarket 封装 shared_assets + 桥接 PluginMarketplace</td></tr>
+      <tr><td>分享路由</td><td><code>server/routes/sharing.ts</code></td><td><span class="tag t-new">待建</span></td><td>publish/discover/install/delete/mine 端点（ADR-16 §8.9.3）</td></tr>
+      <tr><td>shared_assets 表</td><td><code>system/system.sqlite</code></td><td><span class="tag t-old">已规划</span></td><td>ADR-13 已定义 schema，需落地迁移</td></tr>
+      <tr><td>市场底座</td><td><code>lib/plugin-marketplace.ts</code></td><td><span class="tag t-old">已有</span></td><td>复用：新增“本地分享源”视图</td></tr>
+      <tr><td>安装管线</td><td><code>server/routes/plugins.ts</code></td><td><span class="tag t-old">已有</span></td><td>复用 installPluginFromPath / assertInsideDir</td></tr>
+      <tr><td>用户资产层</td><td><code>users/&lt;userId&gt;/tools|workflows</code></td><td><span class="tag t-old">M2 已建</span></td><td>M2 用户脚本/工作流即 B 级原料</td></tr>
+      <tr><td>桌面分享 Tab</td><td><code>desktop/.../SharingTab.tsx</code></td><td><span class="tag t-old">空壳</span></td><td>需改为 Web 版市场 UI</td></tr>
+      <tr><td>路由挂载</td><td><code>server/composition/full-root.ts</code></td><td><span class="tag t-new">待接</span></td><td>新增 createSharingRoute 注入 engineLifecycle+sharingMarket</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>四、待你拍板的关键开放点（澄清问题将逐条问）</h2>
+  <div class="note">
+    M3 设计在 REARCHITECTURE.md 已相当完整，但以下边界仍需你确认，规划才不会跑偏：<br>
+    1) 范围边界：ADR-8B（fork 私有）与 ADR-8C（Sharing Market）是否 M3 都要做，还是先 C？<br>
+    2) “本地分享源”如何生成：动态 build marketplace.json 视图 vs 直接查 shared_assets？<br>
+    3) 安装内容形态：分享的是“源码包”还是“编译后脚本”，与 M2 用户脚本如何对齐？<br>
+    4) 前端 UI：M3 是否包含市场浏览/安装界面（Web 版），还是仅后端 API 先行？<br>
+    5) 版本/更新：首版是否做“原作者发新版提醒”？
+  </div>
+</section>
+
+</main>
+</body>
+</html>
