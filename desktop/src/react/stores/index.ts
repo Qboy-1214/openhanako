@@ -26,6 +26,7 @@ import { createComputerOverlaySlice, type ComputerOverlaySlice } from './compute
 import { createScreenshotSlice, type ScreenshotSlice } from './screenshot-slice';
 import { createSidebarUiSlice, type SidebarUiSlice } from './sidebar-ui-slice';
 import { createFileHistorySlice, type FileHistorySlice } from './file-history-slice';
+import { createMobileNavSlice, type MobileNavSlice } from './mobile-nav-slice';
 import { configureMessageLiveVersionSessionKeyResolver } from './message-live-version';
 
 export type StoreState = ConnectionSlice &
@@ -54,7 +55,8 @@ export type StoreState = ConnectionSlice &
   ComputerOverlaySlice &
   ScreenshotSlice &
   SidebarUiSlice &
-  FileHistorySlice;
+  FileHistorySlice &
+  MobileNavSlice;
 
 export const useStore = create<StoreState>()((set, _get, _api) => ({
   ...createConnectionSlice(set, _get),
@@ -84,6 +86,7 @@ export const useStore = create<StoreState>()((set, _get, _api) => ({
   ...createScreenshotSlice(set),
   ...createSidebarUiSlice(set, _get),
   ...createFileHistorySlice(set, _get),
+  ...createMobileNavSlice(set),
 }));
 
 configureMessageLiveVersionSessionKeyResolver((sessionPath) => (

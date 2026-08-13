@@ -164,6 +164,28 @@ describe('MobileApp', () => {
     expect(screen.queryByText('mobile.auth.title')).not.toBeInTheDocument();
   });
 
+  it('renders the mobile tab bar and switches the active tab without touching desktop currentTab', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL, options?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/web-auth/session')) {
+        return Promise.resolve(jsonResponse({ authenticated: true, principal: principal(['chat', 'resources.read', 'files.read', 'files.write'], 'device') }));
+      }
+      return Promise.resolve(jsonResponse(jsonResponseForMobile(url, options)));
+    });
+
+    render(<MobileApp />);
+    await waitForMobileChatReady();
+
+    const tabBar = screen.getByRole('navigation', { name: 'mobile.tabBar' });
+    expect(tabBar).toBeInTheDocument();
+    // 默认选中 chat，且不污染桌面 currentTab。
+    expect(useStore.getState().mobileActiveTab).toBe('chat');
+
+    fireEvent.click(screen.getByRole('button', { name: 'mobile.tab.channels' }));
+    expect(useStore.getState().mobileActiveTab).toBe('channels');
+    expect(useStore.getState().currentTab).toBe('chat');
+  });
+
   it('can submit a username and password login without sending a device credential', async () => {
     let sessionCalls = 0;
     fetchMock.mockImplementation((input: RequestInfo | URL, options?: RequestInit) => {

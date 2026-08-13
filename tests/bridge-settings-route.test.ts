@@ -103,4 +103,51 @@ describe("bridge settings route", () => {
       richStreamingEnabled: false,
     });
   });
+
+  it("writes a users binding via POST /bridge/binding", async () => {
+    const { app, engine } = makeApp();
+    const agent = engine.getAgent("hana");
+
+    const res = await app.request("/api/bridge/binding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform: "telegram", userId: "tg-user", defaultAgent: "agent-2", role: "user" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(agent.updateConfig).toHaveBeenCalledWith({
+      bridge: { telegram: { users: { "tg-user": { defaultAgent: "agent-2", role: "user" } } } },
+    });
+    const binding = body.status.bindings.telegram.find((b) => b.userId === "tg-user");
+    expect(binding).toEqual({ userId: "tg-user", defaultAgent: "agent-2", role: "user" });
+  });
+
+  it("removes a users binding via remove flag", async () => {
+    const { app, engine } = makeApp();
+    const agent = engine.getAgent("hana");
+    agent.config = { bridge: { telegram: { users: { "tg-user": { defaultAgent: "agent-2", role: "user" } } } } };
+
+    const res = await app.request("/api/bridge/binding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform: "telegram", userId: "tg-user", remove: true }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.status.bindings.telegram).toEqual([]);
+  });
+
+  it("rejects a binding without userId", async () => {
+    const { app } = makeApp();
+
+    const res = await app.request("/api/bridge/binding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform: "telegram" }),
+    });
+
+    expect(res.status).toBe(400);
+  });
 });

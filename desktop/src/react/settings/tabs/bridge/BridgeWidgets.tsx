@@ -203,3 +203,81 @@ function shortOwnerId(id: string) {
   if (value.length <= 8) return value;
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
+
+// ── AccountBindingList ──
+// 展示 bridge[platform].users 映射：每个 userId 的默认 agent 与角色，可编辑或移除。
+
+export interface AccountBinding {
+  userId: string;
+  defaultAgent: string | null;
+  role: 'owner' | 'user' | 'guest';
+}
+
+interface AccountBindingListProps {
+  platform: string;
+  bindings: AccountBinding[];
+  ownerUserId?: string;
+  onBindingChange: (
+    userId: string,
+    partial: { defaultAgent?: string | null; role?: 'owner' | 'user' | 'guest' | null; remove?: boolean },
+  ) => void;
+}
+
+export function AccountBindingList({ platform, bindings, onBindingChange }: AccountBindingListProps) {
+  const [newUserId, setNewUserId] = useState('');
+  const [newAgent, setNewAgent] = useState('');
+
+  const addBinding = () => {
+    const uid = newUserId.trim();
+    if (!uid) return;
+    onBindingChange(uid, { defaultAgent: newAgent.trim() || null, role: 'user' });
+    setNewUserId('');
+    setNewAgent('');
+  };
+
+  return (
+    <div className={`${styles['settings-form-field']} ${'bridge-bindings-field'}`}>
+      <label className={`${styles['settings-form-label']} ${'bridge-bindings-label'}`}>
+        {t('settings.bridge.bindingsTitle')}
+      </label>
+      <p className="bridge-bindings-hint">{t('settings.bridge.bindingsHint')}</p>
+
+      {bindings.length === 0 && (
+        <p className="bridge-bindings-empty">{t('settings.bridge.bindingsEmpty')}</p>
+      )}
+
+      {bindings.map((b) => (
+        <div key={b.userId} className="bridge-binding-row">
+          <span className="bridge-binding-user">{shortOwnerId(b.userId)}</span>
+          <span className="bridge-binding-role">{b.role}</span>
+          <span className="bridge-binding-agent">{b.defaultAgent || '—'}</span>
+          <button
+            className="bridge-binding-remove"
+            onClick={() => onBindingChange(b.userId, { remove: true })}
+            aria-label={t('settings.bridge.bindingRemove')}
+          >
+            {t('settings.bridge.bindingRemove')}
+          </button>
+        </div>
+      ))}
+
+      <div className="bridge-binding-add">
+        <input
+          className="bridge-binding-input"
+          placeholder={t('settings.bridge.bindingUserIdPlaceholder')}
+          value={newUserId}
+          onChange={(e) => setNewUserId(e.target.value)}
+        />
+        <input
+          className="bridge-binding-input"
+          placeholder={t('settings.bridge.bindingAgentPlaceholder')}
+          value={newAgent}
+          onChange={(e) => setNewAgent(e.target.value)}
+        />
+        <button className="bridge-binding-add-btn" onClick={addBinding} disabled={!newUserId.trim()}>
+          {t('settings.bridge.bindingAdd')}
+        </button>
+      </div>
+    </div>
+  );
+}

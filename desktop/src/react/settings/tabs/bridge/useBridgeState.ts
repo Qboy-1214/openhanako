@@ -51,6 +51,20 @@ export interface BridgeStatus {
   richStreamingEnabled: boolean;
   knownUsers: { telegram?: KnownUser[]; feishu?: KnownUser[]; dingtalk?: KnownUser[]; whatsapp?: KnownUser[]; qq?: KnownUser[]; wechat?: KnownUser[] };
   owner: { telegram?: string; feishu?: string; dingtalk?: string; whatsapp?: string; qq?: string; wechat?: string };
+  bindings: {
+    telegram?: BridgeBinding[];
+    feishu?: BridgeBinding[];
+    dingtalk?: BridgeBinding[];
+    whatsapp?: BridgeBinding[];
+    qq?: BridgeBinding[];
+    wechat?: BridgeBinding[];
+  };
+}
+
+export interface BridgeBinding {
+  userId: string;
+  defaultAgent: string | null;
+  role: 'owner' | 'user' | 'guest';
 }
 
 export type BridgePlatform = 'telegram' | 'feishu' | 'dingtalk' | 'whatsapp' | 'qq' | 'wechat';
@@ -109,6 +123,7 @@ function normalizeBridgeStatus(data: unknown): BridgeStatus | null {
     richStreamingEnabled: value.richStreamingEnabled !== false,
     knownUsers: value.knownUsers || {},
     owner: value.owner || {},
+    bindings: value.bindings || {},
   };
 }
 
@@ -444,6 +459,40 @@ export function useBridgeState() {
     }
   };
 
+  // 账户级绑定：写 bridge[platform].users[userId] = { defaultAgent, role }。
+  const saveBinding = async (
+    plat: string,
+    userId: string,
+    partial: { defaultAgent?: string | null; role?: 'owner' | 'user' | 'guest' | null; remove?: boolean },
+  ) => {
+    const agentId = selectedAgentId;
+    try {
+      const agentQuery = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
+      const res = await hanaFetch(`/api/bridge/binding${agentQuery}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform: plat,
+          userId,
+          defaultAgent: partial.defaultAgent ?? undefined,
+          role: partial.role ?? undefined,
+          remove: partial.remove ?? undefined,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (selectedAgentIdRef.current === agentId) {
+        const nextStatus = normalizeBridgeStatus(data?.status);
+        if (nextStatus) {
+          if (agentId) liveStatusOwnersRef.current.add(agentId);
+          applyStatus(nextStatus, agentId);
+        } else await loadStatus();
+      }
+      showToast(t('settings.bridge.ownerSaved'), 'success');
+    } catch {
+      showToast(t('settings.saveFailed'), 'error');
+    }
+  };
+
   const saveGlobalSettings = async (partial: { permissionMode?: BridgePermissionMode; readOnly?: boolean; receiptEnabled?: boolean; richStreamingEnabled?: boolean }) => {
     setGlobalSettingsSaving(true);
     try {
@@ -500,6 +549,6 @@ export function useBridgeState() {
     qqAppSecret: secretDrafts.qqAppSecret.value,
     qqAppSecretDraft: secretDrafts.qqAppSecret,
     setQqAppSecret,
-    saveBridgeConfig, testPlatform, setOwner, saveGlobalSettings,
+    saveBridgeConfig, testPlatform, setOwner, saveBinding, saveGlobalSettings,
   };
 }

@@ -312,6 +312,17 @@ export function buildBridgeStatus(engine: any, manager: any, agent: any) {
     richStreamingEnabled,
     knownUsers: collectKnownUsers(index),
     owner: ownerDict,
+    bindings: KNOWN_PLATFORMS.reduce((acc: Record<string, any>, plat: string) => {
+      const users = bridge[plat]?.users;
+      acc[plat] = users && typeof users === "object"
+        ? Object.entries(users).map(([uid, binding]: [string, any]) => ({
+            userId: uid,
+            defaultAgent: binding?.defaultAgent || null,
+            role: binding?.role || "user",
+          }))
+        : [];
+      return acc;
+    }, {}),
   };
 }
 
@@ -376,6 +387,46 @@ export function createBridgeRoute(engine: any, bridgeManagerRef: any) {
     const agent = resolveAgentStrict(engine, c);
     agent.updateConfig({ bridge: { [platform]: { owner: userId || null } } });
     debugLog()?.log("api", `POST /api/bridge/owner agent=${agent.id} platform=${platform} owner=${userId ? "[set]" : "[cleared]"}`);
+    return c.json({ ok: true, status: buildBridgeStatus(engine, resolveBridgeManager(), agent) });
+  });
+
+  /**
+   * 账户级绑定：记录「哪个 userId 绑定了该平台、默认用哪个 agent、什么角色」。
+   * token 仍是平台级（见 POST /bridge/config），此处只维护 users 映射。
+   * users[userId] = { defaultAgent, role }；role ∈ { owner, user, guest }，缺省视为 user。
+   */
+  route.post("/bridge/binding", async (c) => {
+    const body = await safeJson(c);
+    const { platform, userId, defaultAgent, role, remove } = body;
+    if (!platform || !KNOWN_PLATFORMS.includes(platform)) {
+      return c.json({ error: "invalid platform" }, 400);
+    }
+    if (!userId) {
+      return c.json({ error: "userId is required" }, 400);
+    }
+    const scopeDenied = denyWithoutScope(c, "bridge.manage");
+    if (scopeDenied) return scopeDenied;
+
+    const agent = resolveAgentStrict(engine, c);
+    const bridgeCfg = agent.config?.bridge?.[platform] || {};
+    const users = { ...(bridgeCfg.users || {}) };
+
+    if (remove) {
+      delete users[userId];
+    } else {
+      const next = { ...(users[userId] || {}) };
+      if (typeof defaultAgent === "string" && defaultAgent) next.defaultAgent = defaultAgent;
+      if (role === "owner" || role === "user" || role === "guest") next.role = role;
+      else if (role === null) delete next.role;
+      users[userId] = next;
+    }
+
+    agent.updateConfig({ bridge: { [platform]: { ...bridgeCfg, users } } });
+    const roleSummary = remove ? "[remove]" : "[set role=" + (users[userId]?.role || "user") + "]";
+    debugLog()?.log(
+      "api",
+      `POST /api/bridge/binding agent=${agent.id} platform=${platform} userId=${userId} ${roleSummary}`,
+    );
     return c.json({ ok: true, status: buildBridgeStatus(engine, resolveBridgeManager(), agent) });
   });
 

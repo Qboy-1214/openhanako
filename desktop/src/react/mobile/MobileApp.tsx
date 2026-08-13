@@ -3,9 +3,13 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { AppTitlebar } from '../components/app/AppTitlebar';
 import { ChatPage } from '../components/app/ChatPage';
 import { ChatSidebar } from '../components/app/ChatSidebar';
+import { MarketPage } from '../components/app/MarketPage';
 import { MainContent } from '../MainContent';
 import { StatusBar } from '../components/StatusBar';
 import { ToastContainer } from '../components/ToastContainer';
+import { ChannelHeader } from '../components/channels/ChannelHeader';
+import { ChannelMessages, ChannelInput } from '../components/ChannelsPanel';
+import { PluginPageView } from '../components/plugin/PluginPageView';
 import { toggleSidebar } from '../components/SidebarLayout';
 import { toggleJianSidebar } from '../stores/desk-actions';
 import { togglePreviewPanel } from '../stores/preview-actions';
@@ -165,7 +169,8 @@ function MobileDesktopShell({
   const jianOpen = useStore(s => s.jianOpen);
   const previewOpen = useStore(s => s.previewOpen);
   const mediaViewer = useStore(s => s.mediaViewer);
-  const currentTab = useStore(s => s.currentTab);
+  const mobileActiveTab = useStore(s => s.mobileActiveTab);
+  const setMobileActiveTab = useStore(s => s.setMobileActiveTab);
   const sessions = useStore(s => s.sessions);
   const currentSessionPath = useStore(s => s.currentSessionPath);
   const pendingNewSession = useStore(s => s.pendingNewSession);
@@ -180,10 +185,6 @@ function MobileDesktopShell({
     const currentSession = sessions.find(session => session.path === currentSessionPath);
     return currentSession?.title || currentSession?.firstMessage || t('session.untitled');
   }, [currentSessionPath, pendingNewSession, sessions, t]);
-
-  useEffect(() => {
-    useStore.setState({ currentTab: 'chat' });
-  }, []);
 
   useEffect(() => {
     if (isNarrow) useStore.setState({ sidebarOpen: false, jianOpen: false, previewOpen: false });
@@ -345,7 +346,7 @@ function MobileDesktopShell({
       )}
       <div className="app mobile-desktop-app">
         <ChatSidebar
-          open={sidebarOpen && currentTab === 'chat'}
+          open={sidebarOpen && mobileActiveTab === 'chat'}
           includeChannels={false}
           showSettingsButton={false}
           showActivityBars={false}
@@ -354,7 +355,22 @@ function MobileDesktopShell({
           region="mobile-sidebar"
         />
         <MainContent>
-          <ChatPage inputSurface="mobile" regionPrefix="mobile-" />
+          {mobileActiveTab === 'chat' && <ChatPage inputSurface="mobile" regionPrefix="mobile-" />}
+          {mobileActiveTab === 'channels' && (
+            <div className="channel-page">
+              <div className="channel-view active">
+                <ChannelHeader />
+                <div className="channel-messages">
+                  <ChannelMessages />
+                </div>
+                <div className="channel-input-area">
+                  <ChannelInput />
+                </div>
+              </div>
+            </div>
+          )}
+          {mobileActiveTab === 'market' && <MarketPage />}
+          {mobileActiveTab === 'plugin' && <PluginPageView pluginId="" />}
         </MainContent>
         {previewOpen && (
           <Suspense fallback={null}>
@@ -369,6 +385,7 @@ function MobileDesktopShell({
       </div>
       {showDrawerScrim && <button className="mobile-drawer-scrim" type="button" aria-label={t('mobile.closeSidebar')} onClick={closeMobileDrawers} />}
       <StatusBar />
+      <MobileTabBar activeTab={mobileActiveTab} onTabChange={setMobileActiveTab} />
       <Suspense fallback={null}>
         <LazySettingsModalShell />
       </Suspense>
@@ -480,6 +497,46 @@ function MobileLoginScreen({
 
 function closeMobileDrawers() {
   useStore.setState({ sidebarOpen: false, jianOpen: false });
+}
+
+const MOBILE_TAB_ITEMS: ReadonlyArray<{ tab: 'chat' | 'channels' | 'market' | 'plugin'; labelKey: string }> = [
+  { tab: 'chat', labelKey: 'mobile.tab.chat' },
+  { tab: 'channels', labelKey: 'mobile.tab.channels' },
+  { tab: 'market', labelKey: 'mobile.tab.market' },
+  { tab: 'plugin', labelKey: 'mobile.tab.plugin' },
+];
+
+function MobileTabBar({
+  activeTab,
+  onTabChange,
+}: {
+  activeTab: 'chat' | 'channels' | 'market' | 'plugin';
+  onTabChange: (tab: 'chat' | 'channels' | 'market' | 'plugin') => void;
+}) {
+  const t = window.t ?? ((p: string) => p);
+  return (
+    <nav className="mobile-tab-bar" aria-label={t('mobile.tabBar')}>
+      {MOBILE_TAB_ITEMS.map(({ tab, labelKey }) => (
+        <button
+          key={tab}
+          type="button"
+          className={`mobile-tab-item${activeTab === tab ? ' active' : ''}`}
+          aria-current={activeTab === tab ? 'page' : undefined}
+          onClick={() => onTabChange(tab)}
+        >
+          <span className="mobile-tab-label">{t(labelKey)}</span>
+        </button>
+      ))}
+      <button
+        type="button"
+        className="mobile-tab-item"
+        onClick={() => openSettingsModal()}
+        aria-label={t('mobile.tab.settings')}
+      >
+        <span className="mobile-tab-label">{t('mobile.tab.settings')}</span>
+      </button>
+    </nav>
+  );
 }
 
 function shouldIgnoreMobileEdgeGestureTarget(target: EventTarget | null): boolean {

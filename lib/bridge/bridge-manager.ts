@@ -1104,9 +1104,30 @@ export class BridgeManager {
       messageThreadId,
       targetType: msg.replyTargetType || null,
     });
-    // agentId 优先从消息取，fallback 到 platform entry 的绑定
-    const entry = this._platforms.get(this._getPlatformKey(platform, msgAgentId));
-    const agentId = msgAgentId || entry?.agentId || null;
+    // agentId 解析优先级：
+    //   1) 消息自带的 agentId
+    //   2) 平台级绑定 entry.agentId（旧模型，整平台绑一个 agent）
+    //   3) 账户级绑定 bridge[platform].users[userId].defaultAgent（新模型）
+    let resolvedAgentId = msgAgentId || null;
+    let entry = resolvedAgentId
+      ? this._platforms.get(this._getPlatformKey(platform, resolvedAgentId))
+      : null;
+    if (!resolvedAgentId && userId) {
+      // 先用「整平台」entry（key = platform）拿到宿主 agentId，再查该 agent 的 users 映射。
+      const platformEntry = this._platforms.get(this._getPlatformKey(platform, null));
+      const hostAgentId = platformEntry?.agentId || entry?.agentId || null;
+      const agent = hostAgentId ? this.engine.getAgent?.(hostAgentId) : null;
+      const defaultAgent = agent?.config?.bridge?.[platform]?.users?.[userId]?.defaultAgent;
+      if (defaultAgent) {
+        resolvedAgentId = defaultAgent;
+        entry = this._platforms.get(this._getPlatformKey(platform, resolvedAgentId));
+      }
+    }
+    if (!resolvedAgentId) {
+      entry = entry || this._platforms.get(this._getPlatformKey(platform, null));
+      resolvedAgentId = entry?.agentId || null;
+    }
+    const agentId = resolvedAgentId;
     if (!agentId) {
       log.error(`${platform} 消息缺少 agentId 且 adapter 未绑定，已丢弃。请在 bridge 配置中设置 agentId。`);
       return;

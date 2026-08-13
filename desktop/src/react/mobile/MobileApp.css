@@ -216,3 +216,50 @@ body,
     padding-left: var(--panel-edge-gap);
   }
 }
+
+/* 移动壳底部 tab bar（grill-me 拷问 5·A：内聚于 MobileApp.css，不抽全局断点） */
+.mobile-tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 95;
+  display: flex;
+  align-items: stretch;
+  height: calc(48px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-top: 1px solid var(--overlay-light);
+  background: var(--bg-card, var(--bg));
+  -webkit-app-region: no-drag;
+}
+
+.mobile-tab-item {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-light, #888);
+  font: inherit;
+}
+
+.mobile-tab-item.active {
+  color: var(--accent);
+}
+
+.mobile-tab-item:active {
+  transform: translateY(1px);
+}
+
+.mobile-tab-label {
+  font-size: var(--fs-caption, 12px);
+  line-height: 1.1;
+}
+
+/* 主内容区底部让出 tab bar 高度 + 安全区 */
+.mobile-desktop-root .main-content {
+  padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+}

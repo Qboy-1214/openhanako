@@ -1,8 +1,8 @@
 {
   "name": "HanaAgent",
   "short_name": "HanaAgent",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/mobile",
+  "scope": "/mobile",
   "display": "standalone",
   "background_color": "#f7f1e7",
   "theme_color": "#f7f1e7",
@@ -10,7 +10,8 @@
     {
       "src": "./icon.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

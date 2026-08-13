@@ -6,8 +6,8 @@ import React, { useRef } from 'react';
 import { t } from '../../helpers';
 import { SelectWidget, Toggle, type SelectOption } from '@/ui';
 import { KeyInput } from '../../widgets/KeyInput';
-import { BridgeStatusDot, BridgeStatusText, OwnerSelect } from './BridgeWidgets';
-import type { KnownUser } from './BridgeWidgets';
+import { BridgeStatusDot, BridgeStatusText, OwnerSelect, AccountBindingList } from './BridgeWidgets';
+import type { KnownUser, AccountBinding } from './BridgeWidgets';
 import { SettingsSection } from '../../components/SettingsSection';
 import { SettingsRow } from '../../components/SettingsRow';
 import styles from '../../Settings.module.css';
@@ -36,6 +36,11 @@ interface PlatformSectionProps {
   ownerUsers?: KnownUser[];
   currentOwner?: string;
   onOwnerChange?: (userId: string) => void;
+  bindings?: AccountBinding[];
+  onBindingChange?: (
+    userId: string,
+    partial: { defaultAgent?: string | null; role?: 'owner' | 'user' | 'guest' | null; remove?: boolean },
+  ) => void;
   onCredentialBlur?: () => void;
   children?: React.ReactNode;
 }
@@ -51,6 +56,8 @@ export function PlatformSection({
   ownerUsers,
   currentOwner,
   onOwnerChange,
+  bindings,
+  onBindingChange,
   onCredentialBlur,
   platform,
   children,
@@ -198,6 +205,19 @@ export function PlatformSection({
             users={ownerUsers}
             currentOwner={currentOwner}
             onChange={onOwnerChange}
+          />
+        </div>
+      )}
+
+      {bindings && onBindingChange && (
+        <div style={{
+          padding: 'var(--space-8) var(--space-16)',
+          borderTop: '1px solid var(--border)',
+        }}>
+          <AccountBindingList
+            platform={platform}
+            bindings={bindings}
+            onBindingChange={onBindingChange}
           />
         </div>
       )}

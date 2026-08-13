@@ -123,6 +123,8 @@ export function BridgeTab() {
         ownerUsers={b.status?.knownUsers?.telegram || []}
         currentOwner={b.status?.owner?.telegram}
         onOwnerChange={(userId) => b.setOwner('telegram', userId)}
+        bindings={b.status?.bindings?.telegram || []}
+        onBindingChange={(userId, partial) => b.saveBinding('telegram', userId, partial)}
       />
     ),
     feishu: (
@@ -188,6 +190,8 @@ export function BridgeTab() {
         ownerUsers={b.status?.knownUsers?.feishu || []}
         currentOwner={b.status?.owner?.feishu}
         onOwnerChange={(userId) => b.setOwner('feishu', userId)}
+        bindings={b.status?.bindings?.feishu || []}
+        onBindingChange={(userId, partial) => b.saveBinding('feishu', userId, partial)}
       />
     ),
     dingtalk: (
@@ -242,6 +246,8 @@ export function BridgeTab() {
         ownerUsers={b.status?.knownUsers?.dingtalk || []}
         currentOwner={b.status?.owner?.dingtalk}
         onOwnerChange={(userId) => b.setOwner('dingtalk', userId)}
+        bindings={b.status?.bindings?.dingtalk || []}
+        onBindingChange={(userId, partial) => b.saveBinding('dingtalk', userId, partial)}
       />
     ),
     qq: (
@@ -290,6 +296,8 @@ export function BridgeTab() {
         ownerUsers={b.status?.knownUsers?.qq || []}
         currentOwner={b.status?.owner?.qq}
         onOwnerChange={(userId) => b.setOwner('qq', userId)}
+        bindings={b.status?.bindings?.qq || []}
+        onBindingChange={(userId, partial) => b.saveBinding('qq', userId, partial)}
       />
     ),
   };

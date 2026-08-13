@@ -79,7 +79,8 @@
 4. T4（全量校验，最后）
 
 ## 3. 风险与已核实的真实缺口
-- `mobile-manifest.webmanifest` 不在 `mobile-static.ts` `safeRelativePath` 白名单 → T2 必须补白名单或改名复用 `manifest.webmanifest`。
+- **manifest 供货白名单无缺口（已复核）**：`mobile.html` 引用 `./manifest.webmanifest`，`safeRelativePath` 白名单（server/routes/mobile-static.ts:148）已含 `manifest.webmanifest`；源码 `mobile-manifest.webmanifest` 经构建重命名为 `manifest.webmanifest` 产出，故**无需补白名单**。旧 plan 曾误判为缺口，已更正。
+- **SW 实现已满足 T2**：`mobile-sw.js`（构建产出 `sw.js`）仅预缓存 `/mobile` 子树、`fetch` 跳过 `/api/` 与 `/ws`、网络优先回落缓存——app shell 离线可用且桌面壳 `/` 不受拦截，无需改 SW；默认 scope 即 `/mobile/`，`Service-Worker-Allowed` 头非必须。
 - `ChatPage`/`MainContent` 在 `sidebarOpen:false` 下渲染需实测（T1 验收点）。
 - bridge 入站 handler 改造需确认 webhook 入口具体函数名（在 `server/routes/bridge.ts` 或 `lib/bridge/inbound-*.ts`），T3.2 实施前用 code-explorer 再定位一次。
 
