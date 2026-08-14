@@ -1,5 +1,6 @@
 import { AppError } from '../shared/errors.ts';
 import { errorBus } from '../shared/error-bus.ts';
+import { shouldFailover } from '../lib/llm/failover.ts';
 import { normalizeProviderPayload } from './provider-compat.ts';
 import { buildProviderCompatOptions } from './llm-request-policy.ts';
 import { logLlmUsage, normalizeLlmUsage } from '../lib/llm/usage-observer.ts';
@@ -61,6 +62,15 @@ export type CallTextOptions = {
   returnUsage?: boolean;
   usageContext?: unknown;
   usageLedger?: CallTextUsageLedger | null;
+  // M5 §2.4 D3：utility 通道 failover 回调。由持有 engine 的上游（如 promptSession/chat）
+  // 注入；catch 内遇到 retryable 错误时调用它以拿到重解析的兜底模型凭据（camelCase：
+  // api/apiKey/baseUrl/model），再递归 callText 一次。不传则不触发 failover。
+  resolveFallback?: (err: unknown) => Promise<{
+    api: string;
+    apiKey: string;
+    baseUrl: string;
+    model: CallTextModel;
+  } | null>;
 };
 
 /**
@@ -372,6 +382,22 @@ function convertContentForApi(content, api) {
 }
 
 /**
+ * M5 §2.3 C3 — 全局配额检查器（由 engine 初始化 D1 注入）。
+ * 签名：(userId, modelRef) => { ok: boolean, reason?: string }。
+ * callText 进入时若已注入且能取到 userId，则依此拦截系统兜底模型超额请求。
+ */
+type QuotaCheckFn = (userId: string, modelRef: any) => { ok: boolean; reason?: string };
+let _quotaChecker: QuotaCheckFn | null = null;
+
+export function setQuotaChecker(fn: QuotaCheckFn | null): void {
+  _quotaChecker = fn;
+}
+
+export function getQuotaChecker(): QuotaCheckFn | null {
+  return _quotaChecker;
+}
+
+/**
  * 统一非流式文本生成。
  *
  * @param {object} opts
@@ -422,6 +448,21 @@ export async function callText({
   const modelObj = typeof model === "object" && model !== null ? model : null;
   const modelId = modelObj ? String(modelObj.id || "") : String(model || "");
   const provider = typeof modelObj?.provider === "string" ? modelObj.provider : "custom";
+  // M5 §2.3 C3：进入时按用户查兜底配额（仅系统兜底模型受系统限额）。
+  // 全局配额检查器由 engine 初始化（D1）注入；纯 utility 调用方不注入则不查。
+  // userId 取自 usageContext.attribution.userId（chat 等通道注入）。
+  if (_quotaChecker) {
+    const qUserId = (usageContext as any)?.attribution?.userId;
+    if (qUserId) {
+      const res = _quotaChecker(qUserId, modelObj ?? modelId);
+      if (!res.ok) {
+        throw new AppError("LLM_QUOTA_EXCEEDED", {
+          message: "System fallback model daily quota exceeded",
+          context: { reason: res.reason, userId: qUserId, model: modelId },
+        });
+      }
+    }
+  }
   const explicitMaxTokens = positiveInteger(maxTokens);
   const effectiveOutputPolicy = outputPolicy || (explicitMaxTokens === null ? "provider-default" : "bounded");
   if (effectiveOutputPolicy !== "provider-default" && effectiveOutputPolicy !== "bounded") {
@@ -702,6 +743,29 @@ export async function callText({
         model: { provider, modelId, api },
         costRates: modelObj?.cost,
       });
+    }
+    // M5 §2.4 D3：utility 通道 failover（单次切换，主→兜底即止）。
+    // resolveFallback 由上游注入（持有 engine，能重解析兜底凭据）；无则按原样上抛。
+    // B2 边界：递归 callText 时不再传 resolveFallback（防嵌套），且其入口配额检查会
+    // 在切到兜底前再查兜底配额（超额抛 LLM_QUOTA_EXCEEDED），单层无死锁。
+    if (resolveFallback && shouldFailover(err)) {
+      try {
+        const fb = await resolveFallback(err);
+        if (fb) {
+          return await callText({
+            ...options,
+            api: fb.api,
+            apiKey: fb.apiKey,
+            baseUrl: fb.baseUrl,
+            model: fb.model,
+            resolveFallback: undefined,
+            // 递归调用复用同一 usageLedger/usageContext（userId 透传，供配额查点）
+          } as CallTextOptions);
+        }
+      } catch (retryErr) {
+        // 重试本身失败：上抛重试错误（不含 resolveFallback → 不再二次重试）
+        throw retryErr;
+      }
     }
     throw err;
   }

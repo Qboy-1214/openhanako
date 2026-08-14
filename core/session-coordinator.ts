@@ -126,6 +126,7 @@ import {
   normalizeProviderCacheAffinityKey,
   withProviderCacheAffinity,
 } from "../lib/llm/provider-cache-affinity.ts";
+import { shouldFailover, isFallbackEnabled, getFallbackModel } from "../lib/llm/failover.ts";
 import {
   applyStoredSessionBranchHead,
   persistExplicitSessionBranchHead,
@@ -5038,7 +5039,8 @@ export class SessionCoordinator {
       // be committed onto a now-streaming Session.
       if (entry.session.isStreaming) throw new Error("session_busy");
       this.preflightSessionInput(sessionPath);
-      await entry.session.prompt(text, promptOpts);
+      // M5 §2.4 D4：chat 通道 failover（单次切换，主→兜底即止；仅当前 turn 临时覆写）。
+      await this._promptWithFallback(entry, text, promptOpts);
     } finally {
       if (turnContext) this._deleteRuntimeValueForPath(this._turnContextBySession, sessionPath);
       engine?.endCurrentTurnNativeMedia?.(nativeMediaTurn);
@@ -5051,6 +5053,45 @@ export class SessionCoordinator {
     const forceSummary = entry.memoryBranchReplacementPending === true;
     entry.memoryBranchReplacementPending = false;
     agent?._memoryTicker?.notifyTurn(sessionPath, { forceSummary });
+  }
+
+  /**
+   * M5 §2.4 D4 — chat 通道 failover 封装。
+   * 主模型 prompt 抛 retryable 错误且启用了兜底 → 临时切到兜底模型重试一次；
+   * 重试后无论成败都还原 session 主模型（仅当前 turn 临时覆写，不污染用户配置）。
+   * B2 边界：chat onMessage 预检已查主配额；此处切兜底前由 callText 入口（若经此路径）
+   * 或下方兜底配额判定再查一次（超出则上抛，不重试）。
+   */
+  private async _promptWithFallback(entry: any, text: string, promptOpts: any): Promise<void> {
+    try {
+      await entry.session.prompt(text, promptOpts);
+    } catch (err: any) {
+      if (!shouldFailover(err) || !isFallbackEnabled()) throw err;
+      const fb = getFallbackModel();
+      if (!fb?.id) throw err;
+      const originalModel = entry.session.model;
+      const originalModelId = entry.modelId;
+      const originalModelProvider = entry.modelProvider;
+      try {
+        // 切到兜底模型（仅当前 turn 临时覆写）。若 prompt 抛错前已挂半截 assistant 消息，
+        // session 的 prompt 失败回滚通常会清理；setModel 前不做破坏性操作。
+        await entry.session.setModel({ id: fb.id, provider: fb.provider });
+        entry.modelId = fb.id;
+        entry.modelProvider = fb.provider;
+        // 单次重试（主→兜底即止）。B2 边界：兜底 prompt 内部经 callText 入口的全局
+        // 配额检查器再查兜底配额，超额抛 LLM_QUOTA_EXCEEDED（单层无死锁）。
+        await entry.session.prompt(text, promptOpts);
+      } finally {
+        // 还原用户 session 主模型（重试完恢复，不污染用户配置）
+        try {
+          await entry.session.setModel(originalModel);
+          entry.modelId = originalModelId;
+          entry.modelProvider = originalModelProvider;
+        } catch {
+          /* 还原失败不屏蔽原始错误 */
+        }
+      }
+    }
   }
 
   steerSession(sessionPath: any, text: any) {

@@ -8,6 +8,8 @@ import {
   ensureSecretFileModeSync,
   writeSecretFileSync,
 } from "../shared/secret-fs.ts";
+import { encryptSecret, isEncrypted, getMasterKey } from "../shared/encryption.ts";
+import { DEFAULT_SECRET_KEYS } from "../shared/secret-custody.ts";
 import { SEARCH_CAPABILITY_KIND, SEARCH_CAPABILITY_PROVIDERS } from "../shared/search-providers.ts";
 import { migrationBackupsRoot } from "./migration-backups.ts";
 
@@ -94,12 +96,55 @@ export function normalizeProviderCatalog(value: any = {}) {
   };
 }
 
+/**
+ * M5 §2.2 写入侧收口：递归遍历 catalog，对命中 secret 字段名（DEFAULT_SECRET_KEYS）
+ * 的字符串值做静止加密。已加密（enc:v1: 前缀）的值跳过，避免重复加密。
+ * 无主密钥时 encryptSecret 原样返回，保持明文（向后兼容）。
+ */
+function encryptSecretFields(value: any): void {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) encryptSecretFields(item);
+    return;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (DEFAULT_SECRET_KEYS.has(key)) {
+      if (typeof entry === "string" && !isEncrypted(entry)) {
+        value[key] = encryptSecret(entry);
+      }
+    } else if (entry && typeof entry === "object") {
+      encryptSecretFields(entry);
+    }
+  }
+}
+
+/**
+ * M5 §2.2 B4：是否存在仍为明文的 secret 字段（用于惰性迁移前判定是否需写回）。
+ * 命中 secret 字段名且为字符串且未加密 → true。
+ */
+function hasPlaintextSecret(value: any): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => hasPlaintextSecret(item));
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (DEFAULT_SECRET_KEYS.has(key)) {
+      if (typeof entry === "string" && !isEncrypted(entry)) return true;
+    } else if (entry && typeof entry === "object") {
+      if (hasPlaintextSecret(entry)) return true;
+    }
+  }
+  return false;
+}
+
 function timestampSlug(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
 export class ProviderCatalogStore {
   declare _hanakoHome: string;
+  // M5 §2.2 B4：惰性迁移进程内标记，防止同一请求周期内重复写盘。
+  private _migrating = false;
 
   constructor(hanakoHome: string) {
     if (!hanakoHome) throw new Error("ProviderCatalogStore requires hanakoHome");
@@ -116,8 +161,19 @@ export class ProviderCatalogStore {
 
   load() {
     const existing = this._readExistingCatalog();
-    if (existing) return existing;
-    return this._migrateLegacyCatalog();
+    const catalog = existing ?? this._migrateLegacyCatalog();
+    // M5 §2.2 B4 惰性迁移：主密钥已设且仍有明文 secret → 原地加密并写回。
+    // 与启动时迁移等价，覆盖运行期新增的明文条目；_migrating 防并发重入。
+    if (!this._migrating && getMasterKey() && hasPlaintextSecret(catalog)) {
+      this._migrating = true;
+      try {
+        encryptSecretFields(catalog);
+        this.save(catalog);
+      } finally {
+        this._migrating = false;
+      }
+    }
+    return catalog;
   }
 
   cutoverFromLegacy() {
@@ -155,6 +211,8 @@ export class ProviderCatalogStore {
 
   save(catalog: any) {
     const normalized = normalizeProviderCatalog(catalog);
+    // M5 §2.2 写入侧收口：落盘前对命中 secret 字段做静止加密（无主密钥则保持明文）。
+    encryptSecretFields(normalized);
     writeSecretFileSync(this.catalogPath, JSON.stringify(normalized, null, 2) + "\n");
     return normalized;
   }

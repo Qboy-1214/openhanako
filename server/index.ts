@@ -61,6 +61,8 @@ import { userEngineMiddleware } from "./composition/user-engine-middleware.ts";
 import type { CompositionRoot, CompositionContext } from "./composition/contract.ts";
 import { registerTaskRegistryBusHandlers } from "./task-bus-handlers.ts";
 import { registerDeferredResultBusHandlers } from "./deferred-result-bus-handlers.ts";
+import { initFallback, getQuotaLedger } from "../lib/llm/failover.ts";
+import { setQuotaChecker } from "../core/llm-client.ts";
 import { registerLoopBusHandlers } from "./loop-bus-handlers.ts";
 import { resolveHanakoHome } from "../shared/hana-runtime-paths.ts";
 import { DATA_EPOCH } from "../shared/contract-versions.cjs";
@@ -449,6 +451,14 @@ export async function startServer(root: CompositionRoot = {}): Promise<void> {
   await engine.init((msg: any) => log.log(msg));
   log.log("② engine.init 完成");
   dlog.log("server", "engine initialized");
+
+  // M5 §2.4 D1：启动期 failover 校验 + 配额接线（解析失败仅禁用 failover，不 crash）。
+  {
+    const fb = initFallback(engine, hanakoHome);
+    // 配额检查器全局注册（单实例前提）；failover 未启用时无兜底模型 → 限额判定恒放行。
+    const ledger = getQuotaLedger();
+    setQuotaChecker(fb.fallbackEnabled && ledger ? (userId, modelRef) => ledger.checkLlmQuota(userId, modelRef) : null);
+  }
 
   const outboundProxyRuntime = createOutboundProxyRuntime({
     log: (msg: any) => dlog.log("server", msg),

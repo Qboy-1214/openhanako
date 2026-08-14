@@ -247,6 +247,8 @@ function matchesFilter(entry, filter) {
   if (filter.childSessionId && entry.attribution?.childSessionId !== filter.childSessionId) return false;
   if (filter.childSessionPath && entry.attribution?.childSessionPath !== filter.childSessionPath) return false;
   if (filter.agentId && entry.attribution?.agentId !== filter.agentId) return false;
+  // M5 §2.3 C2：按 userId 过滤（attribution.userId 由调用方注入，如 chat onMessage）。
+  if (filter.userId && entry.attribution?.userId !== filter.userId) return false;
   if (filter.subsystem && entry.source?.subsystem !== filter.subsystem) return false;
   if (filter.operation && entry.source?.operation !== filter.operation) return false;
   if (filter.modelId && entry.model?.modelId !== filter.modelId) return false;

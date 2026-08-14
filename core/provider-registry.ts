@@ -23,6 +23,8 @@ import {
   stripCredentialHeaders,
 } from "../shared/provider-auth.ts";
 import { validateProviderModels } from "../shared/provider-model-validation.ts";
+import { decryptSecret, isEncrypted } from "../shared/encryption.ts";
+import { DEFAULT_SECRET_KEYS } from "../shared/secret-custody.ts";
 import {
   normalizeModelProtocolCompat,
   normalizeToolUseContract,
@@ -1488,6 +1490,28 @@ export class ProviderRegistry {
   // ── credential read + model CRUD ──────────────────────────────────────────
 
   /**
+   * M5 §2.2 读取侧收口：递归遍历，对命中 secret 字段名且已加密（enc:v1:）的字符串
+   * 做解密；非加密值（明文 / 旧数据 / 未设主密钥）原样保留。与 provider-catalog 的
+   * encryptSecretFields 互为逆操作，确保这是唯一的明文还原点。
+   */
+  decryptSecretFields(value: any): void {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const item of value) this.decryptSecretFields(item);
+      return;
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      if (DEFAULT_SECRET_KEYS.has(key)) {
+        if (typeof entry === "string" && isEncrypted(entry)) {
+          value[key] = decryptSecret(entry);
+        }
+      } else if (entry && typeof entry === "object") {
+        this.decryptSecretFields(entry);
+      }
+    }
+  }
+
+  /**
    * 读取 provider 的凭证信息（apiKey, baseUrl, api）
    * 从 Provider Catalog 读取用户配置值，baseUrl/api 不存在时回退到插件默认值。
    * OAuth provider 若 YAML 无 api_key，自动从 auth.json 补全 access token；
@@ -1512,7 +1536,7 @@ export class ProviderRegistry {
     const authType = normalizeProviderAuthType(uc?.auth_type || entry?.authType || plugin?.authType);
     if (!uc && authType !== "oauth") return null;
 
-    let apiKey = uc?.api_key || "";
+    let apiKey = decryptSecret(uc?.api_key ?? "");
     let oauthBaseUrl = "";
     let oauthAccountId = "";
 
@@ -1556,9 +1580,9 @@ export class ProviderRegistry {
       if (!entry) return { token: "", resourceUrl: "", accountId: "" };
       if (typeof entry === "string") return { token: entry, resourceUrl: "", accountId: "" };
       let token = "";
-      if (typeof entry.access === "string") token = entry.access;
-      else if (typeof entry.apiKey === "string") token = entry.apiKey;
-      else if (typeof entry.token === "string") token = entry.token;
+      if (typeof entry.access === "string") token = decryptSecret(entry.access);
+      else if (typeof entry.apiKey === "string") token = decryptSecret(entry.apiKey);
+      else if (typeof entry.token === "string") token = decryptSecret(entry.token);
       return {
         token,
         resourceUrl: entry.resourceUrl || "",
@@ -1599,6 +1623,8 @@ export class ProviderRegistry {
       if (!isLocalProviderPlugin(plugin)) continue;
       raw[providerId] = this._mergeRawProviderConfig(providerId, raw[providerId] || {});
     }
+    // M5 §2.2 读取侧收口：把已加密的 secret 字段还原为明文（无主密钥/未加密则原样保留）。
+    this.decryptSecretFields(raw);
     return raw;
   }
 

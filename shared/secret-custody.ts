@@ -5,7 +5,7 @@ type SecretRecord = Record<string, unknown>;
 
 // This is intentionally an exact-key registry. Do not replace it with suffix or
 // substring matching: callers may store non-secret metadata beside credentials.
-const DEFAULT_SECRET_KEYS = new Set<string>([
+export const DEFAULT_SECRET_KEYS = new Set<string>([
   "api_key",
   "apiKey",
   "token",

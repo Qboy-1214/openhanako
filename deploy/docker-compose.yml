@@ -1,0 +1,65 @@
+# openhanako M5 — docker-compose 即用部署
+#
+# 启动：在 deploy/ 目录 `docker compose up --build`
+# 数据持久化：./data 挂载到容器 /app/data（HANA_HOME）
+#
+# ⚠️ 沙箱安全声明（bwrap 容器内方案 X）：
+#   HANAKO_SANDBOX_BACKEND=bwrap 需要 SYS_ADMIN + apparmor=unconfined，
+#   会显著削弱容器隔离边界（等效于近似宿主机权限），仅受信任部署启用。
+#   若运行不受信多租户，请改用纯 trusted-host 模式（见下方「备选：关闭沙箱」）。
+
+services:
+  hana:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: openhanako:latest
+    container_name: openhanako
+    ports:
+      - "${HANA_PORT:-14500}:14500"
+    volumes:
+      - ./data:/app/data
+      - /proc:/proc:rw
+    environment:
+      HANA_HOME: /app/data
+      HANA_PORT: "${HANA_PORT:-14500}"
+      # 访问令牌（必填）：客户端连接鉴权
+      HANA_TOKEN: "${HANA_TOKEN:-}"
+      # 密钥静止加密主密钥（M5 §2.2）：设则 AES-256-GCM 加密 provider api_key/refresh_token；
+      # 不设则保持明文并告警（向后兼容旧数据）。可为任意长度口令（内部 SHA-256 派生 32B）。
+      HANA_MASTER_KEY: "${HANA_MASTER_KEY:-}"
+      # 兜底模型（M5 §2.4 failover）：显式配置 {provider,id}，如 openai/gpt-4o；
+      # 解析失败 server 启动期 ERROR 拒绝启用 failover（fail-closed）。
+      HANA_FALLBACK_MODEL: "${HANA_FALLBACK_MODEL:-}"
+      # 兜底模型每日配额（M5 §2.3）：按 userId 独立累计，仅系统兜底通道受限。
+      HANA_FALLBACK_QUOTA_DAILY_TOKENS: "${HANA_FALLBACK_QUOTA_DAILY_TOKENS:-}"
+      # 配额逻辑日时区（M5 §2.3 Q7）：默认 UTC，与用户偏好时区解耦；逻辑日 04:00 起算。
+      HANA_QUOTA_TZ: "${HANA_QUOTA_TZ:-UTC}"
+      # 沙箱后端：bwrap（默认，需下方 cap）/ host（关闭沙箱，纯 trusted-host）
+      HANAKO_SANDBOX_BACKEND: "${HANAKO_SANDBOX_BACKEND:-bwrap}"
+    # bwrap 容器内所需权限（逃逸风险，见上方声明）
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor=unconfined
+    restart: unless-stopped
+
+# ── 可选：反代 + TLS（注释态，非强制）─────────────────────────────
+# 启用前先 `cp nginx.conf.example nginx.conf` 并按需修改。
+#  services:
+#    nginx:
+#      image: nginx:stable
+#      ports:
+#        - "443:443"
+#      volumes:
+#        - ./nginx.conf:/etc/nginx/nginx.conf:ro
+#        - ./certs:/etc/nginx/certs:ro
+#      depends_on:
+#        - hana
+#      restart: unless-stopped
+
+# ── 备选：关闭沙箱（纯 trusted-host，无逃逸风险）──────────────────
+#   删除上方 hana 的 cap_add / security_opt / /proc 挂载，并设：
+#     environment:
+#       HANAKO_SANDBOX_BACKEND: host
+#   适用于单用户、受信任、不需工具沙箱隔离的部署场景。

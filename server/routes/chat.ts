@@ -28,6 +28,7 @@ import {
   normalizeSessionReferences,
 } from "../../lib/agent-review/turn-coordinator.ts";
 import { logLlmUsage } from "../../lib/llm/usage-observer.ts";
+import { getQuotaChecker } from "../../core/llm-client.ts";
 import { BrowserManager } from "../../lib/browser/browser-manager.ts";
 import {
   createSessionStreamState,
@@ -2235,6 +2236,20 @@ export function createChatRoute(
               }
               const sessionRefBlock = buildSessionReferenceBlock(sessionRefs);
               if (sessionRefBlock) promptText = `${promptText}\n\n${sessionRefBlock}`;
+              // M5 §2.3 C3：进入 prompt 前按用户查兜底配额（防御性预检；callText 内也会查）。
+              // 优先使用当前 WS 上下文绑定的引擎（eng = ws.engine ?? engine，M1 多用户隔离 H1）。
+              {
+                const qc = getQuotaChecker();
+                const qUserId = client.principal?.userId;
+                if (qc && qUserId) {
+                  const sessionModel = eng.getSessionByPath(promptSessionPath)?.model;
+                  const qRes = qc(qUserId, sessionModel);
+                  if (!qRes.ok) {
+                    wsSend(ws, { type: "error", message: "quota_exceeded", sessionPath: promptSessionPath });
+                    return;
+                  }
+                }
+              }
               try {
                 await h.send(promptText, {
                   sessionId: promptTarget.sessionId,

@@ -24,6 +24,8 @@
  * 错，不写盘、不降级、不返回旧 token。
  */
 
+import { decryptSecret, encryptSecret } from "../shared/encryption.ts";
+
 interface ForceRefreshOptions {
   /** 与 backend 指向同一份存储的 AuthStorage 实例，用于取 provider 和刷新内存副本 */
   authStorage: any;
@@ -61,17 +63,31 @@ export async function forceRefreshOAuthApiKey({
       throw new Error(`Cannot rotate OAuth credential for "${authKey}": no OAuth provider registered`);
     }
 
+    // M5 §2.2：磁盘上的 cred 可能已加密（enc:v1:），刷新前先解密再用。
+    const decryptedCred = {
+      ...cred,
+      access: decryptSecret(cred.access),
+      refresh: decryptSecret(cred.refresh),
+    };
+
     // 存储里的 token 已经不是调用方手上那个了，说明别的执行流刚换过。
     // 直接用新的，不再发一次刷新请求（那会把刚换来的 refresh token 作废）。
-    if (staleApiKey && cred.access !== staleApiKey) {
-      return { result: provider.getApiKey(cred) };
+    // 比对前先解密磁盘 access（Gotcha 1）：加密后密文 ≠ 明文，否则恒走刷新分支。
+    if (staleApiKey && decryptSecret(cred.access) !== staleApiKey) {
+      return { result: provider.getApiKey(decryptedCred) };
     }
 
-    const refreshed = await provider.refreshToken(cred);
+    const refreshed = await provider.refreshToken(decryptedCred);
     const nextCred = { type: "oauth", ...refreshed };
+    // M5 §2.2：写回前对 access/refresh 加密，防明文落盘（refreshed 为明文）。
+    const persistedCred = {
+      ...nextCred,
+      access: encryptSecret(nextCred.access),
+      refresh: encryptSecret(nextCred.refresh),
+    };
     return {
       result: provider.getApiKey(nextCred),
-      next: JSON.stringify({ ...data, [authKey]: nextCred }, null, 2),
+      next: JSON.stringify({ ...data, [authKey]: persistedCred }, null, 2),
     };
   });
 
