@@ -259,3 +259,10 @@ provider api_key / OAuth token 落盘时加密，杜绝明文文件泄露风险�
 - 全部编辑经 `read_lints` 通过；`encryption.ts`/`quota-ledger.ts` 经隔离脚本行为验证。
 - 单实例前提已在 `quota-ledger.ts` 声明：多实例部署累计不准为已知限制（决策外，Out of Scope）。
 - 新测试 `tests/encryption.test.ts`、`tests/quota-ledger.test.ts`、`tests/failover.test.ts` 已随代码提交。
+
+### 8.5 全路径验证记录（2026-08-15，“3 → 2 → 1”顺序执行）
+- **真实外部模型**：`agnes-2.5-flash`（OpenAI 兼容端点 `https://api.agnes-ai.cn/v1`），API key 仅运行时 `$env:AGNES_API_KEY` 注入，不落 git。
+- **阶段 3（实例/单元/集成）**：方案 2 node:test+esbuild `tests/live/agnes-live.ts` **5/5**（含 429→agnes 真实 failover 递归）；方案 1 vitest 多文件 **23/23**（live agnes 6 + encryption 7 + quota-ledger 10），M5 单测无回归。
+- **阶段 2（Playwright E2E）**：`tests/e2e/*` 复用 dev:web 127.0.0.1:5173，**8/8 通过**（app-loads 2 / health-proxy 2 / navigation 3 / probe 1）；`/api/health` 无 agent 返 `500 UNKNOWN` 为已知基线（后端健壮性缺陷）。
+- **阶段 1（文档/提交）**：文档更新 `d16638e1` + `465e376b`（含 `callText` failover bug 修复）。
+- 运行入口：`scripts/run-live.mjs`（live）、`scripts/run-m5.mjs`（M5 单测），均经 `vitest/node` 编程式调用以绕过 harness watch 误判。

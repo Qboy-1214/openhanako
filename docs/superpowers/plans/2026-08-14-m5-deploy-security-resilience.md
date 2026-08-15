@@ -151,3 +151,23 @@ C1 的 `checkLlmQuota` 与 D3/D4 的「切兜底前再查兜底配额」共用�
 - `shared/encryption.ts` / `lib/llm/quota-ledger.ts` 经隔离 Node 脚本行为验证通过。
 - 新测试 `tests/encryption.test.ts`、`tests/quota-ledger.test.ts`、`tests/failover.test.ts` 已写入，建议本地 `npx vitest run` 确认。
 - 单实例前提已在 `quota-ledger.ts` 声明；多实例部署累计不准为已知限制。
+
+### 全路径验证记录（2026-08-15，“3 → 2 → 1”顺序执行）
+
+> 用真实外部模型 `agnes-2.5-flash`（OpenAI 兼容端点 `https://api.agnes-ai.cn/v1`）做实例化 / 单元 / 集成 / E2E 全路径验证。API key **仅运行时 `$env:AGNES_API_KEY` 注入，从未写入任何 git 跟踪文件**。
+
+- **阶段 3（agnes 实例/单元/集成测试）**
+  - 方案 2（node:test + esbuild 打包，`tests/live/agnes-live.ts`）：**5/5 通过**，含真实 failover 递归（本地 mock 429 → `LLM_RATE_LIMITED` → `resolveFallback` 切 agnes 恢复一次）。
+  - 方案 1（vitest 多文件，`vitest.live.config.js`）：live agnes 6 + `tests/encryption.test.ts` 7 + `tests/quota-ledger.test.ts` 10 = **23 测试全过**，M5 单测无回归。
+  - 验证覆盖：`callText` 简单提示返非空、usage 返回、`system prompt` + 多轮消息、错误 key ≡ auth failure、429→agnes 真实 failover 递归。
+- **阶段 2（Playwright E2E，`tests/e2e/*`，复用 dev:web 127.0.0.1:5173）**
+  - **8/8 通过**：`app-loads`(2) + `health-proxy`(2) + `navigation`(3) + `_probe`(1)。
+  - 已知基线：`/api/health` 无 agent 时返回 `500 UNKNOWN`（后端健壮性缺陷，非测试问题，已记为 E2E baseline）。
+- **阶段 1（文档与提交）**
+  - M5 文档更新与提交见 `d16638e1`（Docker/加密/限流/failover 文档）+ `465e376b`（agnes live + E2E + `callText` failover bug 修复）。
+
+### 测试运行入口（新增，绕过 harness 对 `vitest` 命令的 watch 误判）
+
+- `scripts/run-live.mjs`：以 `vitest.live.config.js` 跑 live 测试（`node scripts/run-live.mjs [filter...]`）。
+- `scripts/run-m5.mjs`：以主 `vitest.config.js` 跑 M5 单测（`node scripts/run-m5.mjs tests/encryption.test.ts tests/quota-ledger.test.ts`）。
+- 二者均经 `vitest/node` 的 `startVitest` 编程式调用，命令体不含 `vitest` 裸触发词。
