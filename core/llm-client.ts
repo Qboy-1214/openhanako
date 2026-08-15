@@ -443,6 +443,7 @@ export async function callText({
   returnUsage = false,
   usageContext,
   usageLedger,
+  resolveFallback,
 }: CallTextOptions) {
   // 同时接受完整 model 对象和裸 id。modelObj 用于 provider-compat 决策；modelId 入 payload。
   const modelObj = typeof model === "object" && model !== null ? model : null;
@@ -753,14 +754,27 @@ export async function callText({
         const fb = await resolveFallback(err);
         if (fb) {
           return await callText({
-            ...options,
             api: fb.api,
             apiKey: fb.apiKey,
             baseUrl: fb.baseUrl,
             model: fb.model,
+            headers: requestHeaders,
+            quirks,
+            systemPrompt,
+            messages,
+            temperature,
+            maxTokens,
+            outputBudgetSource,
+            outputPolicy,
+            callPurpose,
+            timeoutMs,
+            signal,
+            returnUsage,
+            usageContext,
+            usageLedger,
             resolveFallback: undefined,
             // 递归调用复用同一 usageLedger/usageContext（userId 透传，供配额查点）
-          } as CallTextOptions);
+          });
         }
       } catch (retryErr) {
         // 重试本身失败：上抛重试错误（不含 resolveFallback → 不再二次重试）
