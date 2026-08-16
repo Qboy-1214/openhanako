@@ -29,7 +29,7 @@
     "start": "node scripts/ensure-windows-sandbox-helper.mjs && npm run build:preload && npm run build:renderer && npm run build:splash && npm run build:theme && node scripts/launch.js electron",
     "start:dev": "node scripts/ensure-windows-sandbox-helper.mjs && npm run build:preload && npm run build:renderer && npm run build:splash && npm run build:theme && node scripts/launch.js electron-dev",
     "start:vite": "node scripts/ensure-windows-sandbox-helper.mjs && npm run build:preload && node scripts/launch.js electron-vite",
-    "dev:web": "node scripts/dev-web.js",
+    "dev:web": "node --experimental-strip-types scripts/dev-web.js",
     "dev:renderer": "vite --config vite.config.ts",
     "build:renderer": "vite build --config vite.config.ts",
     "build:splash": "vite build --config vite.config.splash.ts",

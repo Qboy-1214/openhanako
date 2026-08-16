@@ -33,6 +33,37 @@ function removeStaleServerInfo() {
   }
 }
 
+// 按上一次启动写下的 pid 终止残留 server 进程，释放其持有的 sqlite 锁，
+// 避免新 bootstrap 在 import 主入口时因锁冲突而卡死（Windows 上 SIGBREAK
+// 处理不完整常导致旧 server 变孤儿残留）。
+function terminateProcess(pid) {
+  if (typeof pid !== "number" || pid <= 0) return;
+  try {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/PID", String(pid), "/F", "/T"], { stdio: "ignore" });
+    } else {
+      process.kill(pid, "SIGTERM");
+    }
+  } catch {
+    // ESRCH（进程已不存在）等忽略
+  }
+}
+
+function killStaleServerProcess() {
+  try {
+    const info = JSON.parse(fs.readFileSync(serverInfoPath, "utf-8"));
+    const pid = info?.pid;
+    if (typeof pid === "number" && pid > 0) {
+      // 不要把当前 dev-web 父进程自己杀掉
+      if (pid === process.pid) return;
+      log(`terminating stale server process ${pid}`);
+      terminateProcess(pid);
+    }
+  } catch {
+    // 文件不存在或解析失败都忽略
+  }
+}
+
 function isChildAlive(child) {
   return !!child && child.exitCode === null && child.signalCode === null;
 }
@@ -55,6 +86,7 @@ async function waitForServerInfo({ timeoutMs = 90_000, intervalMs = 200 } = {}) 
 
 function spawnServer() {
   fs.mkdirSync(hanaHome, { recursive: true });
+  killStaleServerProcess();
   removeStaleServerInfo();
 
   const serverEnv = applyDevEnvironment({ ...process.env });
