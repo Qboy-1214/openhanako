@@ -27,6 +27,7 @@ import { normalizeProviderHeaders, stripCredentialHeaders } from "../shared/prov
 import { syncModels } from "./model-sync.ts";
 import { enrichModelFromKnownMetadata } from "./model-known-enrichment.ts";
 import { lookupKnownProvider } from "../shared/known-models.ts";
+import { decryptSecret } from "../shared/encryption.ts";
 import { migrateLegacyApiKeyAuthToProviders } from "./provider-auth-migration.ts";
 import {
   normalizePiSdkThinkingLevel,
@@ -564,7 +565,9 @@ export class ModelManager {
       const allRawProviders = this.providerRegistry.getAllProvidersRaw?.() || {};
       const rawProvider = allRawProviders[entry.id] || allRawProviders[provider] || {};
       return {
-        api_key: rawProvider.api_key || "",
+        // api_key 可能以 enc:v1: 加密形式存储，需解密后交给 SDK AuthStorage，
+        // 否则 SDK 会拿到密文本身导致请求被拒且无流式输出。
+        api_key: decryptSecret(rawProvider.api_key || "") || "",
         base_url: rawProvider.base_url || entry.baseUrl || "",
         api: rawProvider.api || entry.api || "",
         headers: rawProvider.headers || entry.headers || {},

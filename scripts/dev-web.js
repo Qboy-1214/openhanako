@@ -68,6 +68,9 @@ function spawnServer() {
     cwd: rootDir,
     env: serverEnv,
     stdio: "inherit",
+    // 继承父进程的 TS 运行参数（如 --experimental-strip-types），否则子进程
+    // 动态 import() 主入口 server/main-full.ts 会因无法解析 .ts 而卡在 import。
+    execArgv: process.execArgv.length ? process.execArgv : ["--experimental-strip-types"],
   });
 
   serverProcess.on("exit", (code, signal) => {

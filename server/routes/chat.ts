@@ -393,19 +393,16 @@ export function createChatRoute(
       ? msg.sessionId.trim()
       : null;
     const pathSessionId = sessionIdForPath(sessionPath);
-    if (requestedSessionId && pathSessionId && requestedSessionId !== pathSessionId) {
-      wsSend(ws, {
-        type: "error",
-        code: "session_identity_mismatch",
-        message: "sessionId and sessionPath refer to different sessions",
-        sessionId: requestedSessionId,
-        sessionPath,
-      });
-      return null;
-    }
+    // 注意：会话同时拥有 path 派生的 UUID 与短别名（sess_xxx），二者字符串不同
+    // 但指向同一会话。此处不再做严格字符串比较（那会把合法别名误判为 mismatch），
+    // 统一交由下方基于 session manifest 的权威校验：requestedSessionId 必须解析到
+    // 与 sessionPath 一致的 locator，否则才报 mismat ch。
     if (requestedSessionId && typeof engine.getSessionManifest === "function") {
       const manifestPath = engine.getSessionManifest(requestedSessionId)?.currentLocator?.path || null;
-      if (!manifestPath || manifestPath !== sessionPath) {
+      // 仅当 requestedSessionId 明确解析到「另一条」会话时才 mismatch；若短别名无法
+      // 解析（manifestPath 为 null，属正常情况：会话短 id 与 path UUID 并存），则
+      // 信任 sessionPath 为权威标识，不误报。
+      if (manifestPath && manifestPath !== sessionPath) {
         wsSend(ws, {
           type: "error",
           code: "session_identity_mismatch",
@@ -1800,6 +1797,10 @@ export function createChatRoute(
         },
 
         onMessage(event, ws) {
+          // WS 生命周期：消息往来 → 续命 engine 引用（bindEngineToWs 挂载）
+          if (ws._lifecycle && ws._userId) {
+            try { ws._lifecycle.keepAlive(ws._userId); } catch {}
+          }
           // Hono @hono/node-ws delivers event.data as a string for text frames
           const msg = wsParse(event.data);
           if (!msg) return;
@@ -2296,6 +2297,10 @@ export function createChatRoute(
         onClose(event, ws) {
           if (closed) return;
           closed = true;
+          // WS 生命周期：连接关闭 → 释放 engine 引用计数（bindEngineToWs 挂载）
+          if (ws._lifecycle && ws._userId) {
+            try { ws._lifecycle.releaseRef(ws._userId); } catch {}
+          }
           activeWsClients = Math.max(0, activeWsClients - 1);
           clients.delete(ws);
           debugLog()?.log("ws", "client disconnected");

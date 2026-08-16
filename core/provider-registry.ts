@@ -1116,6 +1116,9 @@ export class ProviderRegistry {
     const entry = resolved.entry;
     return {
       ...cloneData(explicitConfig || {}),
+      // api_key 可能以 enc:v1: 加密形式存储，解密后交给下游（AuthStorage、
+      // ExecutionRouter 等），否则 SDK 会拿到密文本身导致请求被拒且无报错。
+      api_key: decryptSecret(explicitConfig?.api_key || ""),
       base_url: explicitConfig?.base_url || entry.baseUrl || "",
       api: explicitConfig?.api || entry.api || "openai-completions",
       headers: explicitConfig?.headers || entry.headers || {},

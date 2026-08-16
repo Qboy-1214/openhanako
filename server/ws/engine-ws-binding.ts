@@ -29,8 +29,12 @@ export function bindEngineToWs(
     .then((handle: any) => {
       ws.engine = handle.engine;
       ws.hub = handle.hub;
-      ws.on("message", () => lifecycle.keepAlive(userId));
-      ws.on("close", () => lifecycle.releaseRef(userId));
+      // 注意：@hono/node-ws 的 onOpen/onMessage/onClose 回调中的 `ws` 是
+      // WSContext（非原生 WebSocket），没有 `.on` 方法。因此不能在 bind 内用
+      // ws.on 注册事件，而是把 lifecycle / userId 挂到 ws，交由 chat.ts 的
+      // onMessage（keepAlive）与 onClose（releaseRef）回调驱动生命周期。
+      ws._lifecycle = lifecycle;
+      ws._userId = userId;
       options.onReady?.(ws); // P0-1: acquire 完成 → 通知 chat.ts flush 待重放队列
     })
     .catch((e: any) => {
