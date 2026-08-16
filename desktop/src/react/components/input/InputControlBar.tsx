@@ -38,15 +38,34 @@ interface Props {
 }
 
 /** 编辑器下方的工具按钮行 + 发送控制 */
-export const InputControlBar = memo(function InputControlBar(props: Props) {
-  const {
-    t, onAttach, slashBtnRef, onSlashToggle,
-    permissionMode, onPermissionModeChange, planModeLocked,
-    showThinking, thinkingLevel, onThinkingChange, availableThinkingLevels,
-    models, sessionModel, isStreaming, hasInput, canSend,
-    showAudioInput, audioRecordingActive, audioRecordingBusy, onAudioToggle,
-    onSend, onSteer, onStop,
-  } = props;
+export const InputControlBar = memo(function InputControlBar({
+  t,
+  onAttach,
+  slashBtnRef,
+  onSlashToggle,
+  permissionMode,
+  onPermissionModeChange,
+  planModeLocked,
+  showThinking,
+  thinkingLevel,
+  onThinkingChange,
+  availableThinkingLevels,
+  models,
+  sessionModel,
+  isStreaming,
+  hasInput,
+  canSend,
+  showAudioInput,
+  audioRecordingActive,
+  audioRecordingBusy,
+  onAudioToggle,
+  onSend,
+  onSteer,
+  onStop
+}: Props) {
+  if (typeof window !== 'undefined') {
+    (window as any).__DEBUG_CONTROL_BAR = { hasInput, canSend, sessionModel, models };
+  }
 
   return (
     <div className={styles['input-bottom-bar']}>

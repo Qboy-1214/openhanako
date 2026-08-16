@@ -63,7 +63,7 @@ export class EngineLifecycle {
       appVersion: this.opts.appVersion,
       builtinMediaAdapters: this.opts.builtinMediaAdapters,
     });
-    await engine.init?.({});
+    await engine.init?.();
     const hub = new Hub({ engine });
     return { engine, hub };
   }

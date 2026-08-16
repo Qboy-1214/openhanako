@@ -1,0 +1,12 @@
+fix(web-auth): align stale web-session studioId to runtime on local server
+
+修复 dev:web 重启后浏览器旧 web session cookie 的 studioId 与 runtime
+studioId 不匹配导致的 403 studio_scope_mismatch，该缺陷阻断 chat 全链路。
+
+- server/http/boundary.ts: createRequestContext 在 connectionKind==="local"
+  的单 studio server 下将 authPrincipal.studioId 对齐到 runtime studioId；
+  远程/多 studio server 保持不变，不破坏跨 studio 隔离语义。
+- tests/request-context-studio-align.test.ts: 4 用例覆盖对齐、匹配不篡改、
+  远程不破坏、studio-less 不误注入。
+- scripts/run-boundary-check.mjs: 主 config 中立测试入口（绕过 watch 误判）。
+- docs: 回写缺陷修复记录。
