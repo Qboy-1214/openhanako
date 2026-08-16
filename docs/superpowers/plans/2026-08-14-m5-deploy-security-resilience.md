@@ -171,3 +171,20 @@ C1 的 `checkLlmQuota` 与 D3/D4 的「切兜底前再查兜底配额」共用�
 - `scripts/run-live.mjs`：以 `vitest.live.config.js` 跑 live 测试（`node scripts/run-live.mjs [filter...]`）。
 - `scripts/run-m5.mjs`：以主 `vitest.config.js` 跑 M5 单测（`node scripts/run-m5.mjs tests/encryption.test.ts tests/quota-ledger.test.ts`）。
 - 二者均经 `vitest/node` 的 `startVitest` 编程式调用，命令体不含 `vitest` 裸触发词。
+
+### 缺陷修复记录：studio_scope_mismatch 阻断 chat 全链路（2026-08-16）
+
+> 与 M5 业务无直接耦合，属 dev:web 本地鉴权在「单 studio 本地 server」场景下的健壮性缺陷。Agnes 全链路 E2E 准备阶段发现并修复。
+
+**根因**：`server/routes/sessions.ts` 对 `GET /api/sessions`（及所有走 scope guard 的端点）做 studio 校验：`runtimeStudioId = request.runtimeContext.studioId` vs `principalStudioId = request.authPrincipal.studioId`，两者不等则 `403 studio_scope_mismatch`。
+
+dev:web 每次启动 `loadServerIdentity` 重新生成 `studio_<uuid>`，并写入 `~/.hanako-dev/server-info.json`。浏览器持有的 web session cookie 是**旧** studioId（重启前签发）。前端经该 cookie 走 `authenticateWebSession` 得到 `authPrincipal.studioId = 旧值`，而 `runtimeContext.studioId = 当前新值` → 校验失败 → chat 前置的 `/api/sessions` 被 403，全链路阻断。
+
+**修复**（`server/http/boundary.ts` 的 `createRequestContext`）：在 **本地单 studio server**（`runtimeContext.connectionKind === "local"`）下，将 `authPrincipal.studioId` 对齐到 `runtimeContext.studioId`。语义上本地 server 只有这一个 studio，所有本地登录/loopback 身份都应绑定到它。远程/多 studio server（`connectionKind !== "local"`）**不做任何对齐**，保留平台侧 studioId，不破坏跨 studio 隔离。
+
+**验证**：
+- 新增回归测试 `tests/request-context-studio-align.test.ts`（4 用例）：local 旧 studioId 对齐 / 匹配不篡改 / 远程不破坏 / studio-less 不误注入，全部通过（`node scripts/run-boundary-check.mjs request-context-studio-align`）。
+- 运行时复现：构造旧 studioId 的 web session（桌面 profile 完整 scopes）经 `GET /api/sessions` → **200 []**（修复前必 403 `studio_scope_mismatch`）；loopback token 路径原本即 200，无回归。
+- `read_lints` 对 `server/http/boundary.ts` 与新增测试均无错误。
+
+**配套脚本**：`scripts/run-boundary-check.mjs`（主 `vitest.config.js` 跑边界/对齐相关测试，编程式 `startVitest`，绕过 watch 误判）。

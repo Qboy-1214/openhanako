@@ -6,7 +6,21 @@ export { HttpRouteError, jsonRouteError } from "./route-errors.ts";
 
 export function createRequestContext(c, engine) {
   const runtimeContext = readRuntimeContext(engine);
-  const authPrincipal = normalizePrincipal(readAuthPrincipal(c) || createAuthPrincipal(runtimeContext));
+  let authPrincipal = normalizePrincipal(readAuthPrincipal(c) || createAuthPrincipal(runtimeContext));
+  // 本地 server 只有单一 studio：重启会重新生成 studioId，但浏览器持有的 web
+  // session cookie 仍是旧 studioId。这种“同机旧身份”在单 studio 本地环境下应当
+  // 绑定到当前 runtime studio，而不是被当作 scope 不匹配拒绝。远程/多 studio
+  // server（connectionKind !== "local"）不做任何对齐，保持平台侧 studioId 语义。
+  if (
+    runtimeContext?.connectionKind === "local"
+    && authPrincipal?.studioId
+    && authPrincipal.studioId !== runtimeContext.studioId
+  ) {
+    authPrincipal = normalizePrincipal({
+      ...authPrincipal,
+      studioId: runtimeContext.studioId,
+    });
+  }
   const request = {
     method: c?.req?.method || "GET",
     url: c?.req?.url || "http://hana.local/",
